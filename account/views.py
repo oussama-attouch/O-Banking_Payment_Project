@@ -1,4 +1,3 @@
-# Import necessary functions and classes from Django modules
 from django.shortcuts import render, redirect
 from account.models import KYC, Account
 from account.forms import KYCForm
@@ -10,7 +9,7 @@ def account(request):
     # Check if the user is logged in
     if request.user.is_authenticated:
         try:
-            # Try to retrieve KYC (Know Your Customer) information associated with the user
+            # Retrieve KYC (Know Your Customer) information associated with the user
             kyc = KYC.objects.get(user=request.user)
         except:
             # If no KYC information found, show a warning message and redirect to KYC registration
