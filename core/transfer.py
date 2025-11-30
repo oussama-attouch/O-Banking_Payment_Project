@@ -88,7 +88,7 @@ def process_amount_transfer(request, account_number):
         messages.warning(request, "An error occurred. Please try again later.")
         return redirect("core:amount-transfer", account.account_number)
 
-# Define a function named TransferConfirmation that takes three parameters: request, account_number, and transaction_id
+# function TransferConfirmation that takes three parameters: request, account_number, and transaction_id
 def TransferConfirmation(request, account_number, transaction_id):
     try:
         # Try to retrieve an Account object with the given account_number from the database
@@ -103,7 +103,7 @@ def TransferConfirmation(request, account_number, transaction_id):
         # Display a warning message using Django's messages framework
         messages.warning(request, "Transaction does not exist.")
 
-        # Redirect the user to the "account:account" URL, which presumably displays account information
+        # Redirect the user to the "account:account" URL, which displays account information
         return redirect("account:account")
 
     # If the try-except block does not raise an exception, create a dictionary context
@@ -113,7 +113,6 @@ def TransferConfirmation(request, account_number, transaction_id):
     }
 
     # Render the "transfer/transfer-confirmation.html" template with the provided context
-    # This template presumably displays the account and transaction details
     return render(request, "transfer/transfer-confirmation.html", context)
 
 
