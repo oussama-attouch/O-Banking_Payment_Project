@@ -1,4 +1,3 @@
- # Import necessary modules and functions from Django and other libraries
 from django.db import models
 import uuid
 from shortuuid.django_fields import ShortUUIDField
@@ -21,18 +20,18 @@ ACCOUNT_STATUS_CHOICES = [
 # Choices for marital status
 MARRTIAL_STATUS = {
     ("married", "Married"),
-    ("single", "Single"),  # Fixed a typo in "single"
+    ("single", "Single"),
     ("other", "Other")
 }
 
 # Choices for gender
 GENDER = {
     ("male", "Male"),
-    ("female", "Female"),  # Fixed a typo in "female"
+    ("female", "Female"),  
     ("other", "Other")
 }
 
-# Containing the choices for identity types
+# Choices for identity types
 IDENTITY_TYPE = [
     ("passport", "Passport"),
     ("driver_license", "Driver's License"),
