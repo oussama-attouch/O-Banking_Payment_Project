@@ -153,10 +153,10 @@
                                             <a href="/admin"><i class="fas fa-user"></i>Admin</a>
                                         </li>
                                         <li class="border-area">
-                                            <a href="account.html"><i class="fas fa-cog"></i>Settings</a>
+                                            <a href="{% url 'account:account' %}"><i class="fas fa-cog"></i>Settings</a>
                                         </li>
                                         <li>
-                                            <a href="javascript:void(0)"><i class="fas fa-sign-out"></i>Logout</a>
+                                            <a href="{% url 'userauths:sign-out' %}"><i class="fas fa-sign-out"></i>Logout</a>
                                         </li>
                                     </ul>
                                 </div>
@@ -192,34 +192,34 @@
                                 </a>
                             </li>
                             <li>
-                                <a href="money-exchange.html">
+                                <a href="javascript:void(0)">
                                     <img src="{% static 'assets/images/icon/exchange.png' %}" alt="Exchange"> <span>Exchange</span>
                                 </a>
                             </li>
                             <li>
-                                <a href="recipients.html">
+                                <a href="javascript:void(0)">
                                     <img src="{% static 'assets/images/icon/recipients.png' %}" alt="Recipients"> <span>Recipients</span>
                                 </a>
                             </li>
                             <li>
-                                <a href="crypto.html">
+                                <a href="javascript:void(0)">
                                     <img src="{% static 'assets/images/icon/crypto.png' %}" alt="Crypto"> <span>Crypto</span>
                                 </a>
                             </li>
                             <li>
-                                <a href="deposit-money.html">
+                                <a href="javascript:void(0)">
                                     <img src="{% static 'assets/images/icon/deposit.png' %}" alt="Deposit"> <span>Deposit Money</span>
                                 </a>
                             </li>
                             <li>
-                                <a href="withdraw-money-step-1.html">
+                                <a href="javascript:void(0)">
                                     <img src="{% static 'assets/images/icon/withdraw.png' %}" alt="Withdraw"> <span>Withdraw Money</span>
                                 </a>
                             </li>
                         </ul>
                         <ul class="bottom-item">
                             <li class="active">
-                                <a href="account.html">
+                                <a href="{% url 'account:account' %}">
                                     <img src="{% static 'assets/images/icon/account.png' %}" alt="Account"> <span>Account</span>
                                 </a>
                             </li>
