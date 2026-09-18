@@ -1,0 +1,16 @@
+# Python bytecode
+*.pyc
+__pycache__/
+
+# Databases — the original snapshot and any working copies must never be committed
+db.sqlite3
+*.sqlite3
+*.sqlite3-journal
+
+# Local environment
+venv/
+.venv/
+.env
+
+# User-uploaded KYC documents (identity photos, signatures)
+media/

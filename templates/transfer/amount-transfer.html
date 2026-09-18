@@ -1,0 +1,140 @@
+{% extends "partials/dashboard-base.html" %}
+{% load static %}
+{% load humanize %}
+{% block content %}
+    <!-- Dashboard Section start -->
+    <section class="dashboard-section body-collapse pay step step-2">
+        <div class="overlay pt-120">
+            <div class="container-fruid">
+                <div class="main-content">
+                    <div class="head-area d-flex align-items-center justify-content-between">
+                        <h4>Make a Payment</h4>
+                        <div class="icon-area">
+                            <img src="{% static 'assets1/images/icon/support-icon.png' %}" alt="icon">
+                        </div>
+                    </div>
+                    <div class="choose-recipient">
+                        <div class="step-area">
+                            <span class="mdr">Step 2 of 3</span>
+                            <h5>Set Amount of transfer</h5>
+                        </div>
+                        <div class="user-select">
+                            <div class="single-user">
+                                <div class="left d-flex align-items-center">
+                                    <div class="img-area">
+                                        <!-- <img src="{{ a.user.kyc.image.url }}" alt="image"> -->
+                                        <img src="{{ account.user.kyc.image.url }}" style="width: 100px; height: 100px; border-radius: 50%; object-fit: cover;"  alt="image">
+    
+                                    </div>
+                                    <div class="text-area">
+                                        <p>{{ account.user.kyc.full_name|title }}</p>
+                                        <span class="mdr"><b>{{ account.account_number }}</b></span> <br>
+                                        <span class="mdr">{{ account.user.email }}</span>
+                                    </div>
+                                </div>
+                                <div class="right">
+                                    
+                                    <a href="{% url 'core:amount-transfer' account.account_number %}">
+                                        <i class="icon-h-edit"></i>
+                                        Edit
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <form action="{% url 'core:amount-transfer-process' account.account_number %}" method="POST">
+                        {% csrf_token %}
+                        <div class="send-banance">
+                            <span class="mdr">You Send</span>
+                            <div class="input-area">
+                                <input class="xxlr" onkeyup="CalculateBalance()" placeholder="{{request.user.account.account_balance|intcomma}}" type="number" name="amount-send" id="amount-send">
+                                <select>
+                                    <option value="1">USD</option>
+                                    <option value="2">USD</option>
+                                    <option value="3">USD</option>
+                                </select>
+                            </div>
+                           
+                        </div>
+                        <!-- Js -->
+
+                        <div class="send-banance pt-0 mt-0">
+                            <span class="mdr">Payment Description</span>
+                            <div class="input-area">
+                                <input class="xxlr" onkeyup="CalculateBalance()" placeholder="Payment for fees" type="text" name="description">
+                                
+                            </div>
+                        </div>
+                        <script>
+                            // Define a function named CalculateBalance
+                            function CalculateBalance() {
+                                // Get the user's current account balance from the server
+                                let available_balance = "{{ request.user.account.account_balance }}";
+                        
+                                // Get the HTML element with the ID "new_balance"
+                                let new_balance = document.getElementById("new_balance");
+                        
+                                // Get the HTML element with the ID "amount-send"
+                                let sendAmount_input = document.getElementById("amount-send");
+                        
+                                // Get the value entered in the "amount-send" input field
+                                let sendAmount = sendAmount_input.value;
+                        
+                                // Get the HTML element with the ID "error-div"
+                                let errorDiv = document.getElementById("error-div");
+                        
+                                // Get the HTML element with the ID "total-to-pay"
+                                let total_to_pay = document.getElementById("total-to-pay");
+                        
+                                // Create an empty array to store potential errors
+                                let errors = [];
+                        
+                                // Calculate the new balance after subtracting the sent amount
+                                new_bal = available_balance - sendAmount;
+                        
+                                // Log the new balance to the console
+                                console.log(new_bal);
+                        
+                                // Update the "new_balance" HTML element with the new balance
+                                // Use innerHTML to display the new balance with proper formatting
+                                new_balance.innerHTML = `New Balance <b> $${new_bal.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")} </b>`;
+                        
+                                // Update the "total_to_pay" HTML element with the sent amount
+                                // Use innerHTML to display the sent amount with proper formatting
+                                total_to_pay.innerHTML = `USD <b> $${sendAmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")} </b>`;
+                        
+                                // Check if the new balance is negative
+                                if (new_bal < 0) {
+                                    // Change the text color of "new_balance" to red
+                                    new_balance.style.color = "red";
+                        
+                                    // Display an alert informing the user they can only send up to their available balance
+                                    alert("You can only send $" + available_balance.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","));
+                                } else {
+                                    // Change the text color of "new_balance" to a different color
+                                    new_balance.style.color = "#27276e";
+                                }
+                            }
+                        </script>
+                        
+                        
+                        <ul class="total-fees">
+                            <li>Total Fees</li>
+                            <li>Free</li>
+                        </ul>
+                        <ul class="total-fees pay">
+                            <li><h5>Total To Pay</h5></li>
+                            <li><h5 id="total-to-pay">USD 0.00</h5></li>
+                        </ul>
+                        <div class="footer-area mt-40">
+                            <a href="pay-step-1.html">Previous Step</a>
+                            <button type="submit" id="amount-transfer" style="padding: 10px 30px; border-radius: 10px; background: rgb(98, 0, 255); color: #fff;" class="active">Next</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- Dashboard Section end -->
+
+    {% endblock content %}
