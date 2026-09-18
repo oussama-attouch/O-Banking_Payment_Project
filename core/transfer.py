@@ -39,7 +39,7 @@ def AmountTransfer(request, account_number):
     except:
         # If the account doesn't exist, show a warning message and redirect
         messages.warning(request, "Account does not exist.")
-        return redirect("core:search-user-by-account-number")
+        return redirect("core:search-account")
 
     # Prepare context data to pass to the template
     context = {
@@ -80,7 +80,7 @@ def process_amount_transfer(request, account_number):
 
             # Get the ID of the transaction that was created now
             transaction_id = new_transaction.transaction_id
-            return redirect("core:TransferConfirmation", account.account_number, transaction_id)
+            return redirect("core:transfer-confirmation", account.account_number, transaction_id)
         else:
             messages.warning(request, "Insufficient Funds.")
             return redirect("core:amount-transfer", account.account_number)

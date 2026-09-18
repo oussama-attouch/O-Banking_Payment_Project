@@ -18,18 +18,22 @@ ACCOUNT_STATUS_CHOICES = [
 ]
 
 # Choices for marital status
-MARRTIAL_STATUS = {
+# NOTE: deliberately a tuple, not a set. A set's iteration order is randomised
+# per process by PYTHONHASHSEED, which made makemigrations serialise these
+# choices in a different order on every run and produced permanent phantom
+# drift against the migration state.
+MARRTIAL_STATUS = (
     ("married", "Married"),
     ("single", "Single"),
-    ("other", "Other")
-}
+    ("other", "Other"),
+)
 
 # Choices for gender
-GENDER = {
+GENDER = (
     ("male", "Male"),
-    ("female", "Female"),  
-    ("other", "Other")
-}
+    ("female", "Female"),
+    ("other", "Other"),
+)
 
 # Choices for identity types
 IDENTITY_TYPE = [

@@ -134,6 +134,7 @@ def Settlement_processing(request,account_number,transaction_id):
         if pin_number == sender_account.account_pin:
             if sender_account.account_balance <= 0 or sender_account.account_balance < transaction.amount:
                 messages.warning(request,"Insufficient Funds, Fund your account and try again.")
+                return redirect("core:settlement-confirmation", account.account_number, transaction.transaction_id)
             else:
                 sender_account.account_balance -= transaction.amount 
                 sender_account.save() 
@@ -145,7 +146,7 @@ def Settlement_processing(request,account_number,transaction_id):
                 transaction.save()
 
                 messages.success(request,f"Settled to {account.user.kyc.full_name} was successfull.")
-                return redirect("core:settlement-completed")
+                return redirect("core:settlement-completed", account.account_number, transaction.transaction_id)
         else:
             messages.warning(request,"Incorrect Pin")
             return redirect("core:settlement-confirmation",account.account_number,transaction.transaction_id)

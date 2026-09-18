@@ -1,0 +1,31 @@
+{% extends "partials/dashboard-base.html" %}
+{% load static %}
+{% load humanize %}
+{% block content %}
+    <!-- Dashboard Section start -->
+    <section class="dashboard-section body-collapse">
+        <div class="overlay pt-120">
+            <div class="container-fruid">
+                <div class="main-content">
+                    <div class="head-area d-flex align-items-center justify-content-between">
+                        <h4>Payment Request</h4>
+                        <div class="icon-area">
+                            <!-- <img src="{% static 'assets1/images/icon/support-icon.png' %}" alt="icon"> -->
+                        </div>
+                    </div>
+                    <div class="request-submitted pb-120 text-center">
+                        <div class="top-area">
+                            <div class="icon-area">
+                                <img src="{% static 'assets/images/icon/not-confirm.png' %}" alt="icon">
+                            </div>
+                            <h3>Not Permitted</h3>
+                            <p>Payment request <b>{{transaction.transaction_id}}</b> does not belong to this account, so it cannot be deleted here.</p>
+                            <h5><a href="{% url 'core:transactions' %}"><b>Back to transactions</b></a></h5>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- Dashboard Section end -->
+{% endblock content %}
