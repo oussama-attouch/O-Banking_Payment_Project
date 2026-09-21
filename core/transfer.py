@@ -148,9 +148,13 @@ def TransferProcess(request, account_number, transaction_id):
     completed = False
     
     if request.method == "POST":
-        pin_number = request.POST.get("pin-number")
+        submitted_password = request.POST.get("password")
 
-        if pin_number == sender_account.account_pin:
+        if not submitted_password:
+            messages.warning(request, "Please enter your password.")
+            return redirect("core:transfer-confirmation", account.account_number, transaction.transaction_id)
+
+        if request.user.check_password(submitted_password):
             insufficient = False
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
@@ -190,7 +194,7 @@ def TransferProcess(request, account_number, transaction_id):
             messages.success(request, "Transfer Successfull.")
             return redirect("core:transfer-completed", account.account_number, transaction.transaction_id)
         else:
-            messages.warning(request, "Incorrect Pin.")
+            messages.warning(request, "Incorrect password.")
             return redirect('core:transfer-confirmation', account.account_number, transaction.transaction_id)
     else:
         messages.warning(request, "An error occured, Try again later.")

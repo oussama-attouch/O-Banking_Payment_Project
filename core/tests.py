@@ -245,7 +245,7 @@ class OwnershipTests(MoneyMovementTestBase):
         self.assertEqual(carol.get(self.transfer_confirmation_url(txn)).status_code, 302)
 
         resp = carol.post(
-            self.transfer_process_url(txn), {"pin-number": self.carol_acct.account_pin}
+            self.transfer_process_url(txn), {"password": PASSWORD}
         )
         self.assertEqual(resp.status_code, 302)
 
@@ -301,7 +301,7 @@ class TransferFlowTests(MoneyMovementTestBase):
         self.assertEqual(self.client.get(self.transfer_confirmation_url(txn)).status_code, 200)
 
         done = self.client.post(
-            self.transfer_process_url(txn), {"pin-number": self.alice_acct.account_pin}
+            self.transfer_process_url(txn), {"password": PASSWORD}
         )
         self.assertEqual(done.status_code, 302)
         self.assertIn("transfer-completed", done["Location"])
@@ -311,14 +311,33 @@ class TransferFlowTests(MoneyMovementTestBase):
         self.assertEqual(txn.status, "completed")
         self.assertEqual(self.balances(), (Decimal("900.00"), Decimal("600.00")))
 
-    def test_wrong_pin_does_not_move_money(self):
+    def test_wrong_password_does_not_move_money(self):
+        """Phase 1b: the account PIN is gone; the password is re-entered instead."""
         txn = self.create_transfer(amount="100.00")
         before = self.balances()
-        wrong = "0000" if self.alice_acct.account_pin != "0000" else "1111"
 
-        resp = self.client.post(self.transfer_process_url(txn), {"pin-number": wrong})
+        resp = self.client.post(
+            self.transfer_process_url(txn), {"password": "definitely-not-the-password"}
+        )
         self.assertEqual(resp.status_code, 302)
         self.assertIn("transfer-confirmation", resp["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "processing")
+        self.assertEqual(self.balances(), before)
+
+    def test_empty_password_is_rejected(self):
+        """An empty submission must re-prompt with a message, not 500 or execute."""
+        txn = self.create_transfer(amount="100.00")
+        before = self.balances()
+
+        resp = self.client.post(
+            self.transfer_process_url(txn), {"password": ""}, follow=True
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.redirect_chain)
+        self.assertIn("/transfer-confirmation/", resp.redirect_chain[-1][0])
+        self.assertIn("Please enter your password.", resp.content.decode())
 
         txn.refresh_from_db()
         self.assertEqual(txn.status, "processing")
@@ -338,7 +357,7 @@ class TransferFlowTests(MoneyMovementTestBase):
 
         failed = self.client.post(
             self.transfer_process_url(txn),
-            {"pin-number": self.alice_acct.account_pin},
+            {"password": PASSWORD},
             follow=True,
         )
         self.assertEqual(failed.status_code, 200)

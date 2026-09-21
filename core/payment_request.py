@@ -108,16 +108,19 @@ def AmountRequestFinalProcess(request, account_number,transaction_id):
     account = Account.objects.get(account_number=account_number)
 
     if request.method == "POST":
-        pin_number = request.POST.get("pin-number")
-        if pin_number == request.user.account.account_pin:
+        submitted_password = request.POST.get("password")
+        if not submitted_password:
+            messages.warning(request, "Please enter your password.")
+            return redirect("core:amount-request-confirmation", account.account_number, transaction.transaction_id)
+        if request.user.check_password(submitted_password):
             transaction.status = "request_sent"
             transaction.save()
 
             messages.success(request,"Your Payment request have been sent successfully.")
             return redirect("core:amount-request-completed",account.account_number,transaction.transaction_id)
         else:
-            messages.warning(request,"An Error Occured, Try again later.")
-            return redirect("account:dashboard")
+            messages.warning(request,"Incorrect password.")
+            return redirect("core:amount-request-confirmation",account.account_number,transaction.transaction_id)
         
 @login_required
 def RequestCompleted(request,transaction_id,account_number):
@@ -165,8 +168,11 @@ def Settlement_processing(request,account_number,transaction_id):
     sender_account = request.user.account 
 
     if request.method == "POST":
-        pin_number = request.POST.get("pin-number")
-        if pin_number == sender_account.account_pin:
+        submitted_password = request.POST.get("password")
+        if not submitted_password:
+            messages.warning(request, "Please enter your password.")
+            return redirect("core:settlement-confirmation", account.account_number, transaction.transaction_id)
+        if request.user.check_password(submitted_password):
             insufficient = False
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
@@ -202,7 +208,7 @@ def Settlement_processing(request,account_number,transaction_id):
             messages.success(request,f"Settled to {account.user.kyc.full_name} was successfull.")
             return redirect("core:settlement-completed", account.account_number, transaction.transaction_id)
         else:
-            messages.warning(request,"Incorrect Pin")
+            messages.warning(request,"Incorrect password.")
             return redirect("core:settlement-confirmation",account.account_number,transaction.transaction_id)
     else:
         messages.warning(request,"Error Occured")

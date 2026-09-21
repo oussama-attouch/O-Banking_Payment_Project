@@ -26,7 +26,18 @@ class AccountProvisioningTests(TestCase):
             username="solo", email="solo@test.invalid", password=PASSWORD
         )
         self.assertEqual(Account.objects.filter(user=user).count(), 1)
-        self.assertTrue(user.account.account_pin)
+        self.assertTrue(user.account.account_number)
+
+    def test_account_model_has_no_pin_field(self):
+        """Phase 1b: the 4-digit account PIN was removed entirely.
+
+        Money movement now re-enters the account password and verifies it with
+        django.contrib.auth.check_password, so no PIN column should remain.
+        """
+        user = User.objects.create_user(
+            username="nopin", email="nopin@test.invalid", password=PASSWORD
+        )
+        self.assertFalse(hasattr(user.account, "account_pin"))
 
     def test_user_save_does_not_revert_a_balance_changed_elsewhere(self):
         user = User.objects.create_user(

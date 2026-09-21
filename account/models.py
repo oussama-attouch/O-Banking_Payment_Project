@@ -61,8 +61,6 @@ class Account(models.Model):
     # ShortUUIDField for account ID, with specified parameters
     account_id = ShortUUIDField(unique=True, length=7, max_length=25, prefix="DEX", alphabet="1234567890")
     
-    # ShortUUIDField for account PIN, with specified parameters
-    account_pin = ShortUUIDField(unique=True, length=4, max_length=7, alphabet="1234567890")
     
     # ShortUUIDField for a reference code, with speci<fied parameters
     ref_code = ShortUUIDField(unique=True, length=10, max_length=10, alphabet="abcdfgh1234567890")
