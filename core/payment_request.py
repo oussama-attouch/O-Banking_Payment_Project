@@ -174,6 +174,7 @@ def Settlement_processing(request,account_number,transaction_id):
             return redirect("core:settlement-confirmation", account.account_number, transaction.transaction_id)
         if request.user.check_password(submitted_password):
             insufficient = False
+            already_processed = False
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
                 # so two concurrent settlements in opposite directions cannot
@@ -187,19 +188,36 @@ def Settlement_processing(request,account_number,transaction_id):
                 sender_row = locked[str(sender_account.pk)]
                 receiver_row = locked[str(account.pk)]
 
+                # Phase 1.6 (F1): re-read the transaction under the same lock.
+                # As in TransferProcess, the status was written but never checked,
+                # so re-POSTing this URL settled the same request repeatedly. Only
+                # "request_sent" is settleable -- that is what
+                # AmountRequestFinalProcess sets once the request has been sent.
+                locked_txn = (
+                    Transaction.objects.select_for_update()
+                    .filter(pk=transaction.pk)
+                    .first()
+                )
+
+                if locked_txn is None or locked_txn.status != "request_sent":
+                    already_processed = True
                 # Re-checked against the LOCKED row, so the check and the debit
                 # cannot be raced by a concurrent balance change.
-                if sender_row.account_balance <= 0 or sender_row.account_balance < transaction.amount:
+                elif sender_row.account_balance <= 0 or sender_row.account_balance < locked_txn.amount:
                     insufficient = True
                 else:
-                    sender_row.account_balance -= transaction.amount
+                    sender_row.account_balance -= locked_txn.amount
                     sender_row.save()
 
-                    receiver_row.account_balance += transaction.amount
+                    receiver_row.account_balance += locked_txn.amount
                     receiver_row.save()
 
-                    transaction.status = "request_settled"
-                    transaction.save()
+                    locked_txn.status = "request_settled"
+                    locked_txn.save()
+
+            if already_processed:
+                messages.warning(request, "This settlement has already been processed.")
+                return redirect("core:transaction-detail", transaction.transaction_id)
 
             if insufficient:
                 messages.warning(request,"Insufficient Funds, Fund your account and try again.")

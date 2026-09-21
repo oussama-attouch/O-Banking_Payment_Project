@@ -118,6 +118,14 @@ def TransferConfirmation(request, account_number, transaction_id):
         # Redirect the user to the "account:account" URL, which displays account information
         return redirect("account:account")
 
+    # Phase 1.6 (F1): this page is the only UI route into TransferProcess, so a
+    # finished transfer must not be re-confirmable. Without this guard a browser
+    # Back after a completed transfer returned a working password form, and
+    # submitting it moved the money a second time.
+    if transaction.status != "processing":
+        messages.warning(request, "This transfer has already been processed.")
+        return redirect("core:transaction-detail", transaction.transaction_id)
+
     # If the try-except block does not raise an exception, create a dictionary context
     context = {
         "account": account,
@@ -156,6 +164,7 @@ def TransferProcess(request, account_number, transaction_id):
 
         if request.user.check_password(submitted_password):
             insufficient = False
+            already_processed = False
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
                 # so two concurrent transfers in opposite directions cannot
@@ -169,23 +178,41 @@ def TransferProcess(request, account_number, transaction_id):
                 sender_row = locked[str(sender_account.pk)]
                 receiver_row = locked[str(account.pk)]
 
+                # Phase 1.6 (F1): re-read the transaction under the same lock.
+                # Its status used to be written but never checked, so a second
+                # POST of this URL re-applied the debit and the credit -- reachable
+                # by accident (browser Back, then Submit again) as well as on
+                # purpose. Only "processing" is settleable, which is the status
+                # process_amount_transfer creates.
+                locked_txn = (
+                    Transaction.objects.select_for_update()
+                    .filter(pk=transaction.pk)
+                    .first()
+                )
+
+                if locked_txn is None or locked_txn.status != "processing":
+                    already_processed = True
                 # The balance was only checked when the transaction was created.
                 # Re-check it against the LOCKED row, because the sender may have
                 # spent the money in the meantime. Rejecting here leaves the
                 # transaction in "processing" so the user can fund the account
                 # and retry the same transfer.
-                if sender_row.account_balance < transaction.amount:
+                elif sender_row.account_balance < locked_txn.amount:
                     insufficient = True
                 else:
-                    transaction.status = "completed"
-                    transaction.save()
+                    locked_txn.status = "completed"
+                    locked_txn.save()
 
                     # Remove the amount from the sender, add it to the receiver.
-                    sender_row.account_balance -= transaction.amount
+                    sender_row.account_balance -= locked_txn.amount
                     sender_row.save()
 
-                    receiver_row.account_balance += transaction.amount
+                    receiver_row.account_balance += locked_txn.amount
                     receiver_row.save()
+
+            if already_processed:
+                messages.warning(request, "This transfer has already been processed.")
+                return redirect("core:transaction-detail", transaction.transaction_id)
 
             if insufficient:
                 messages.warning(request, "Insufficient Funds.")

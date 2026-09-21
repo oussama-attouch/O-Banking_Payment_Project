@@ -14,8 +14,9 @@ from decimal import Decimal
 
 from django.test import Client, TestCase, override_settings
 from django.urls import get_resolver, reverse
+from django.utils import timezone
 
-from account.models import Account
+from account.models import Account, KYC
 from core.models import Transaction
 from userauths.models import User
 
@@ -442,3 +443,115 @@ class DeleteRequestTests(MoneyMovementTestBase):
     def test_route_no_longer_ends_in_html(self):
         txn = self.create_request()
         self.assertNotIn(".html", self.delete_url(txn))
+
+
+# =====================================================================
+# Phase 1.6 (F1)  replay of an already-completed money movement
+# =====================================================================
+class ReplayGuardTests(MoneyMovementTestBase):
+    """A second POST of the confirmation URL must not move money again.
+
+    Neither ``TransferProcess`` nor ``Settlement_processing`` used to look at
+    ``transaction.status``. The status was only ever *written*, never checked, so
+    re-submitting the same confirmation form re-applied the debit and the credit.
+    That is reachable by accident (browser Back after a successful transfer, then
+    Submit again) as well as deliberately.
+    """
+
+    def settlement_process_url(self, txn):
+        return reverse(
+            "core:settlement-processing",
+            args=[self.bob_acct.account_number, txn.transaction_id],
+        )
+
+    def give_kyc(self, acct, full_name):
+        """Seed a KYC row.
+
+        Not optional scaffolding: ``Settlement_processing``'s success branch reads
+        ``account.user.kyc.full_name``, so settling to a user without KYC raises
+        ``RelatedObjectDoesNotExist`` inside the view. Reaching the authenticated
+        UI at all requires KYC (``account.views.account`` redirects to kyc-reg), so
+        a party with KYC is the realistic precondition. See finding F3.
+        """
+        KYC.objects.update_or_create(
+            user=acct.user,
+            defaults=dict(
+                account=acct,
+                full_name=full_name,
+                nationality="MA",
+                marrital_status="single",
+                gender="male",
+                identity_type="passport",
+                date_of_birth=timezone.now(),
+                signature="kyc/test.png",
+                country="MA",
+                city="Casablanca",
+                state="Casablanca",
+                mobile="0600000000",
+                fax="",
+            ),
+        )
+
+    def test_transfer_process_rejects_already_completed_transaction(self):
+        txn = self.create_transfer(amount="100.00")
+
+        first = self.client.post(self.transfer_process_url(txn), {"password": PASSWORD})
+        self.assertEqual(first.status_code, 302)
+        self.assertIn("transfer-completed", first["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "completed")
+        completed_balances = self.balances()
+        self.assertEqual(completed_balances, (Decimal("900.00"), Decimal("600.00")))
+
+        # Replay the exact same POST, with the correct password.
+        replay = self.client.post(self.transfer_process_url(txn), {"password": PASSWORD})
+        self.assertNotEqual(replay.status_code, 500, "a replayed POST must not 500")
+        self.assertEqual(replay.status_code, 302)
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "completed", "replay changed the status")
+        self.assertEqual(
+            self.balances(), completed_balances, "replay moved money a second time"
+        )
+
+    def test_settlement_processing_rejects_already_completed_transaction(self):
+        txn = self.create_request(amount="100.00", status="request_sent")
+        self.give_kyc(self.bob_acct, "Bob")
+
+        first = self.client.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        self.assertEqual(first.status_code, 302)
+        self.assertIn("settlement-completed", first["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_settled")
+        settled_balances = self.balances()
+        self.assertEqual(settled_balances, (Decimal("900.00"), Decimal("600.00")))
+
+        replay = self.client.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        self.assertNotEqual(replay.status_code, 500, "a replayed settlement must not 500")
+        self.assertEqual(replay.status_code, 302)
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_settled", "replay changed the status")
+        self.assertEqual(
+            self.balances(), settled_balances, "replay moved money a second time"
+        )
+
+    def test_transfer_confirmation_get_is_refused_once_completed(self):
+        """Browser Back after a successful transfer used to show a live form."""
+        txn = self.create_transfer(amount="100.00")
+        self.assertEqual(
+            self.client.get(self.transfer_confirmation_url(txn)).status_code, 200
+        )
+
+        self.client.post(self.transfer_process_url(txn), {"password": PASSWORD})
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "completed")
+
+        resp = self.client.get(self.transfer_confirmation_url(txn), follow=True)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.redirect_chain, "the completed confirmation must redirect")
+        self.assertIn("already been processed", resp.content.decode())
+        # And the password form must be gone from the response.
+        self.assertNotIn('name="password"', resp.content.decode())
