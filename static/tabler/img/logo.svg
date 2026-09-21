@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="32" viewBox="0 0 180 32"
+     role="img" aria-label="O-Banking" color="#206bc4">
+  <title>O-Banking</title>
+  <!--
+    Minimal single-colour wordmark. No external fonts, no raster assets, no
+    network requests: the text is laid out by the viewer's own system font
+    stack. `fill` is `currentColor` so an inlined copy inherits the surrounding
+    text colour; the `color` attribute above supplies the accent when the file
+    is used through <img>, where CSS inheritance does not reach.
+  -->
+  <text x="0" y="23"
+        font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+        font-size="22" font-weight="700" letter-spacing="-0.4"
+        fill="currentColor">O-Banking</text>
+</svg>

@@ -57,7 +57,7 @@ sources and `package.json` are deliberately **not** vendored.
 | `static/tabler/icons/fonts/tabler-icons.woff2` | 490.8 KB | `@tabler/icons-webfont` `dist/fonts/` |
 | `static/tabler/icons/fonts/tabler-icons.woff` | 755.9 KB | `@tabler/icons-webfont` `dist/fonts/` |
 | `static/tabler/icons/LICENSE` | 1.0 KB | `@tabler/icons-webfont` |
-| `static/tabler/LICENSE` | 1.0 KB | see note below |
+| `static/tabler/LICENSE` | 1.1 KB | upstream `tabler/tabler` (not in the npm tarball) — see note below |
 
 No modifications were made to any vendored file; each is a byte-for-byte copy of
 its upstream original.
@@ -78,9 +78,14 @@ contain a `LICENSE` file — its payload is `dist/`, `js/`, `scss/`, `libs.json`
  */
 ```
 
-`static/tabler/LICENSE` is the Tabler project's MIT licence text as shipped in the
-sibling `@tabler/icons-webfont` package. Both packages are MIT, both are the work
-of the same authors, and the text is identical.
+`static/tabler/LICENSE` is the **byte-exact upstream** licence file from
+`https://raw.githubusercontent.com/tabler/tabler/main/LICENSE` (1090 bytes,
+sha256 `4F88A82D13BE3C5C63A12C5631EAE914AA4381B6DC17641BF1AB85F3F8F6C8A5`). It
+is the MIT text with the copyright line `Copyright (c) 2018-2026 The Tabler
+Authors`, matching the banner in `tabler.min.css` above.
+
+This file is vendored separately from the npm tarballs because `@tabler/core`
+does not ship one. The full text is reproduced under [Licence text](#licence-text).
 
 ### Offline guarantee
 
@@ -100,9 +105,11 @@ files:
 
 ## Licence text
 
-MIT License
+### `static/tabler/LICENSE` — `@tabler/core` (upstream `tabler/tabler`)
 
-Copyright (c) 2020-2026 Paweł Kuna
+The MIT License (MIT)
+
+Copyright (c) 2018-2026 The Tabler Authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -111,16 +118,23 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+### `static/tabler/icons/LICENSE` — `@tabler/icons-webfont`
+
+The same MIT terms, with the copyright line
+`Copyright (c) 2020-2026 Paweł Kuna`. The file is vendored verbatim at
+`static/tabler/icons/LICENSE` (1073 bytes,
+sha256 `B740A1D46122672DA62833E97F7E7C8A13FA85CBC7445B584B297CC00DDE93DB`).
 
 ---
 

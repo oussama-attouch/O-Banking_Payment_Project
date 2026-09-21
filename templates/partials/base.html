@@ -1,149 +1,90 @@
 {% load static %}
 <!doctype html>
-<html lang="eng">
+<html lang="en" data-bs-theme="light">
 
 <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>O-Banking</title>
-     <!-- <base href="{% static '' %}">   -->
-    <link rel="shortcut icon" href="{% static 'assets1/images/fav.png' %}" type="image/x-icon">
-    <link rel="stylesheet" href="{% static 'assets1/css/bootstrap.min.css' %}">
-    <link rel="stylesheet" href="{% static 'assets1/css/fontawesome.min.css' %}">
-    <link rel="stylesheet" href="{% static 'assets1/css/jquery-ui.css' %}">
-    <link rel="stylesheet" href="{% static 'assets1/css/plugin/nice-select.css' %}">
-    <link rel="stylesheet" href="{% static 'assets1/css/plugin/magnific-popup.css' %}">
-    <link rel="stylesheet" href="{% static 'assets1/css/plugin/slick.css' %}">
-    <link rel="stylesheet" href="{% static 'assets1/css/arafat-font.css' %}">
-    <link rel="stylesheet" href="{% static 'assets1/css/plugin/animate.css' %}">
-    <link rel="stylesheet" href="{% static 'assets1/css/style.css' %}">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}O-Banking{% endblock %}</title>
+
+    <link rel="stylesheet" href="{% static 'tabler/css/tabler.min.css' %}">
+    <link rel="stylesheet" href="{% static 'tabler/icons/tabler-icons.min.css' %}">
+    <link rel="stylesheet" href="{% static 'tabler/css/tabler-vendors.min.css' %}">
+
+    <style>
+        :root {
+            --ob-accent: #206bc4;
+        }
+
+        body {
+            font-variant-numeric: tabular-nums;
+        }
+    </style>
 </head>
 
-<body> 
+<body class="d-flex flex-column min-vh-100">
 
-    <a href="javascript:void(0)" class="scrollToTop"><i class="fas fa-angle-double-up"></i></a>
+    <header class="navbar navbar-expand-md d-print-none">
+        <div class="container-xl">
+            <a class="navbar-brand d-flex align-items-center" href="{% url 'core:index' %}">
+                <img src="{% static 'tabler/img/logo.svg' %}" width="180" height="32"
+                     alt="O-Banking" class="navbar-brand-image">
+            </a>
 
-    <header class="header-section">
-        <div class="overlay">
-            <div class="container">
-                <div class="row d-flex header-area">
-                    <nav class="navbar navbar-expand-lg navbar-light">
-                        <a class="navbar-brand" href="{% url 'core:index' %}">
-                            <img src="{% static 'assets1/images/logo.png' %}"  alt="logo" width="70px"height="70px">
-                        </a>
-                        <button class="navbar-toggler collapsed" type="button" data-bs-toggle="collapse"
-                            data-bs-target="#navbar-content">
-                            <i class="fas fa-bars"></i>
-                        </button>
-                        <div class="collapse navbar-collapse justify-content-end" id="navbar-content">
-                            <ul class="navbar-nav mr-auto mb-2 mb-lg-0">
-                                <li class="nav-item dropdown main-navbar">
-                                    <a class="nav-link dropdown-toggle"
-                                        data-bs-toggle="dropdown" data-bs-auto-close="outside">Personal</a>
-                                    <ul class="dropdown-menu main-menu shadow">
-                                        <li><a class="nav-link" href="payments-01.html">Freelancer Payments</a></li>
-                                        <li><a class="nav-link" href="subscriptions.html">Subscriptions</a></li>
-                                        <li><a class="nav-link" href="security.html">Security</a></li>
-                                        <li><a class="nav-link" href="fees.html">Fees</a></li>
-                                    </ul>
-                                </li>
-                                <li class="nav-item dropdown main-navbar">
-                                    <a class="nav-link dropdown-toggle" href="javascript:void(0)"
-                                        data-bs-toggle="dropdown" data-bs-auto-close="outside">Business</a>
-                                    <ul class="dropdown-menu main-menu shadow">
-                                        <li><a class="nav-link" href="payments-01.html">Business Payments</a></li>
-                                        <li><a class="nav-link" href="business-account.html">Business Account</a></li>
-                                        <li><a class="nav-link" href="corporate-card.html">Corporate Card</a></li>
-                                        <li><a class="nav-link" href="expense-management.html">Expense Management</a></li>
-                                        <li><a class="nav-link" href="budgeting-and-analytics.html">Budgeting</a></li>
-                                        <li><a class="nav-link" href="integrations.html">Integrations</a></li>
-                                        <li><a class="nav-link" href="invoice-management.html">Invoice</a></li>
-                                        <li><a class="nav-link" href="security.html">Security</a></li>
-                                        <li><a class="nav-link" href="rewards.html">Rewards</a></li>
-                                        <li><a class="nav-link" href="fees.html">Fees</a></li>
-                                    </ul>
-                                </li>
-                                <li class="nav-item dropdown main-navbar">
-                                    <a class="nav-link dropdown-toggle" href="javascript:void(0)"
-                                        data-bs-toggle="dropdown" data-bs-auto-close="outside">Company</a>
-                                    <ul class="dropdown-menu main-menu shadow">
-                                        <li><a class="nav-link" href="career.html">Career</a></li>
-                                        <li><a class="nav-link" href="career-details.html">Career Details</a></li>
-                                        <li class="dropend sub-navbar">
-                                            <a href="javascript:void(0)" class="dropdown-item dropdown-toggle" data-bs-toggle="dropdown"
-                                              data-bs-auto-close="outside">Blog</a>
-                                            <ul class="dropdown-menu sub-menu shadow">
-                                                <li><a class="nav-link" href="blog.html">Blog</a></li>
-                                                <li><a class="nav-link" href="blog-details.html">Blog Details</a></li>
-                                            </ul>
-                                        </li>
-                                        <li><a class="nav-link" href="error.html">Error</a></li>
-                                    </ul>
-                                </li>
-                                <li class="nav-item dropdown main-navbar">
-                                    <a class="nav-link dropdown-toggle" href="javascript:void(0)"
-                                        data-bs-toggle="dropdown" data-bs-auto-close="outside">Help</a>
-                                    <ul class="dropdown-menu main-menu shadow">
-                                        <li><a class="nav-link" href="help-center.html">Help Center</a></li>
-                                        <li><a class="nav-link" href="help-center-category.html">Help Category</a></li>
-                                    </ul>
-                                </li>
-                            </ul>
-                            <div class="right-area header-action d-flex align-items-center max-un">
-                                {% if request.user.is_authenticated %}
-                                <a href="/admin" class="login cmn-btn">Admin</a>
-                                <a href="{% url 'userauths:sign-out' %}" class="login cmn-btn">Sign Out</a>
-                                {% else %}
-                                <a href="{% url 'userauths:sign-in' %}" class="login">Login</a>
-                                <a href="{% url 'userauths:sign-up' %}" class="cmn-btn">Sign Up
-                                    <i class="fas fa-caret-right"></i>
-                                </a>
-                                {% endif %}
-                                
-                            </div>
-                        </div>
-                    </nav>
-                </div>
-                <!-- alert start -->
-                {% if messages %}
-                    {% for message in messages %}
-                        <div class="alert alert-{{message.tags}}">
-                            <strong>{{ message }}</strong>
-                        </div>
-                    {% endfor %}
+            <div class="navbar-nav flex-row order-md-last align-items-center">
+                {% if request.user.is_authenticated %}
+                    {% if request.user.is_staff %}
+                    <div class="nav-item">
+                        <a class="nav-link" href="/admin">Admin</a>
+                    </div>
+                    {% endif %}
+                    <div class="nav-item">
+                        <a class="nav-link" href="{% url 'userauths:sign-out' %}">Sign Out</a>
+                    </div>
+                {% else %}
+                    <div class="nav-item">
+                        <a class="nav-link" href="{% url 'userauths:sign-in' %}">Login</a>
+                    </div>
+                    <div class="nav-item">
+                        <a class="btn btn-primary ms-2" href="{% url 'userauths:sign-up' %}">Sign Up</a>
+                    </div>
                 {% endif %}
-                <script>
-                    setTimeout (() => {
-                        $(".alert").alert("close");
-                    }, 4000)
-                </script>
-                <!-- alert end -->
             </div>
         </div>
     </header>
-    <!-- header-section end -->
 
-{% block content %}
-  
-{% endblock content %}
+    {% if messages %}
+    <div class="container-xl mt-3">
+        {% for message in messages %}
+        <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags|default:'info' }}{% endif %} alert-dismissible"
+             role="alert">
+            <div class="d-flex">
+                <div>{{ message }}</div>
+            </div>
+            <a class="btn-close" data-bs-dismiss="alert" aria-label="Close"></a>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 
+    <main class="page-wrapper flex-fill">
+        {% block content %}{% endblock %}
+    </main>
 
-    
-    <!--==================================================================-->
-    <!-- <script src="{% static 'assets1/js/jquery.min.js' %}"></script> -->
-    <script src="{% static 'assets1/js/jquery-ui.js' %}"></script>
-    <script src="{% static 'assets1/js/bootstrap.min.js' %}"></script>
-    <script src="{% static 'assets1/js/fontawesome.js' %}"></script>
-    <script src="{% static 'assets1/js/plugin/slick.js' %}"></script>
-    <script src="{% static 'assets1/js/plugin/jquery.nice-select.min.js' %}"></script>
-    <script src="{% static 'assets1/js/plugin/counter.js' %}"></script>
-    <script src="{% static 'assets1/js/plugin/waypoint.min.js' %}"></script>
-    <script src="{% static 'assets1/js/plugin/jquery.magnific-popup.min.js' %}"></script>
-    <script src="{% static 'assets1/js/plugin/wow.min.js' %}"></script>
-    <script src="{% static 'assets1/js/plugin/plugin.js' %}"></script>
-    <script src="{% static 'assets1/js/main.js' %}"></script>
+    <footer class="footer footer-transparent d-print-none mt-auto">
+        <div class="container-xl">
+            <div class="row text-center">
+                <div class="col-12 text-secondary">
+                    O-Banking &mdash; academic project, 2026
+                </div>
+                <div class="col-12 text-secondary small mt-1">
+                    Final-year coursework. Not a real bank, and no real money moves.
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="{% static 'tabler/js/tabler.min.js' %}" defer></script>
 </body>
 
 </html>

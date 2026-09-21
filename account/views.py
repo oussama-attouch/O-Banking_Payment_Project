@@ -73,26 +73,17 @@ def kyc_registration(request):
     return render(request, "account/kyc-form.html", context)
 
 def dashboard(request):
-     # Check if the user is logged in
-    if request.user.is_authenticated:
-        try:
-            # Try to retrieve KYC (Know Your Customer) information associated with the user
-            kyc = KYC.objects.get(user=request.user)
-        except:
-            # If no KYC information found, show a warning message and redirect to KYC registration
-            messages.warning(request, "You need to submit your KYC")
-            return redirect("account:kyc-reg")
-        
-        # If KYC information exists, retrieve the user's account details
-        account = Account.objects.get(user=request.user)
-    else:
-        # If the user is not logged in, show a warning message and redirect to the sign-in page
-        messages.warning(request, "You need to log in to access the dashboard")
-        return redirect("userauths:sign-in")
+    """Alias for the account page.
 
-    # Create a context dictionary with KYC and account details
-    context = {
-        "kyc": kyc,
-        "account": account,
-    }
-    return render(request,"account/dashboard.html",context)
+    Phase 2a-1a deleted templates/account/dashboard.html: 760 lines whose context
+    was 9-of-11 unbacked by any view, and which linked core:card-detail -- a route
+    that does not exist, so it was a latent NoReverseMatch (HTTP 500) the moment
+    anything supplied credit_card.
+
+    The URL name account:dashboard is deliberately kept, because existing links
+    and redirects reference it (core.payment_request.AmountRequestProcess, and
+    the transaction-detail / search-account pages). They now land on the real
+    account page, which applies the same authentication and KYC gates with the
+    same message text.
+    """
+    return redirect("account:account")
