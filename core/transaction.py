@@ -1,5 +1,6 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import get_object_or_404, render, redirect
 from core.models import Transaction 
+from core.security import party_transaction_filter
 from account.models import Account
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -24,7 +25,11 @@ def transaction_lists(request):
 
 @login_required
 def transaction_detail(request, transaction_id):
-    transaction = Transaction.objects.get(transaction_id=transaction_id)
+    # Scoped to the requesting user: someone else's transaction ID yields 404,
+    # exactly as a non-existent ID does, so detail pages cannot be enumerated.
+    transaction = get_object_or_404(
+        Transaction, party_transaction_filter(request.user, transaction_id)
+    )
 
     context = {
         "transaction":transaction,

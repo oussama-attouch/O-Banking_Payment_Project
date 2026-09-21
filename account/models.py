@@ -3,6 +3,7 @@ import uuid
 from shortuuid.django_fields import ShortUUIDField
 from userauths.models import User  # Importing the User model from another module
 from django.db.models.signals import post_save  # Importing a signal for post-save actions
+from django.dispatch import receiver
 
 # Function to determine the directory path for user-uploaded files
 def user_directory_path(instance, filename):
@@ -141,17 +142,28 @@ class KYC(models.Model):
     class Meta:
         ordering = ['-date']
 
-    # Signal function to create an Account instance when a User instance is created
-    def create_account(sender, instance, created, **kwargs):
-        if created:
-            Account.objects.create(user=instance)
 
-    # Signal function to save the Account instance when a User instance is saved
-    def save_account(sender, instance, **kwargs):
-        instance.account.save()
-
-    # Connect the create_account signal to the User model's post-save signal
-    post_save.connect(create_account, sender=User)
-
-    # Connect the save_account signal to the User model's post-save signal
-    post_save.connect(save_account, sender=User)
+# Account provisioning for new users.
+#
+# This receiver used to be declared inside the KYC class body (as a method of
+# KYC, which was never correct) and was paired with a second receiver:
+#
+#     def save_account(sender, instance, **kwargs):
+#         instance.account.save()
+#     post_save.connect(save_account, sender=User)
+#
+# That second receiver was removed in Phase 1. Accessing ``instance.account``
+# caches the Account on the User instance, so on every subsequent User.save()
+# -- including the one Django itself performs on every login via
+# update_last_login -- the stale cached Account row was written back verbatim.
+# Any balance change made through a different Account instance (Django admin,
+# a management command, a shell session, a data migration) was silently
+# reverted. Nothing needs that receiver: whatever mutates an Account already
+# saves it.
+#
+# Only create_account remains. It is idempotent per new User and is what
+# provisions the one-to-one Account that Account.user requires.
+@receiver(post_save, sender=User)
+def create_account(sender, instance, created, **kwargs):
+    if created:
+        Account.objects.create(user=instance)
