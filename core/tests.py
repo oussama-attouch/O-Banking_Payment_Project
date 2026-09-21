@@ -82,6 +82,18 @@ class MoneyMovementTestBase(TestCase):
             args=[self.bob_acct.account_number, txn.transaction_id],
         )
 
+    def settlement_confirmation_url(self, txn):
+        return reverse(
+            "core:settlement-confirmation",
+            args=[self.bob_acct.account_number, txn.transaction_id],
+        )
+
+    def settlement_process_url(self, txn):
+        return reverse(
+            "core:settlement-processing",
+            args=[self.bob_acct.account_number, txn.transaction_id],
+        )
+
     def create_transfer(self, amount="10.00", status="processing"):
         return Transaction.objects.create(
             user=self.alice, sender=self.alice, reciever=self.bob,
@@ -458,12 +470,6 @@ class ReplayGuardTests(MoneyMovementTestBase):
     Submit again) as well as deliberately.
     """
 
-    def settlement_process_url(self, txn):
-        return reverse(
-            "core:settlement-processing",
-            args=[self.bob_acct.account_number, txn.transaction_id],
-        )
-
     def give_kyc(self, acct, full_name):
         """Seed a KYC row.
 
@@ -538,6 +544,25 @@ class ReplayGuardTests(MoneyMovementTestBase):
             self.balances(), settled_balances, "replay moved money a second time"
         )
 
+    def test_settlement_confirmation_get_is_refused_once_completed(self):
+        """F4: mirror of the TransferConfirmation guard from Phase 1.6."""
+        txn = self.create_request(amount="100.00", status="request_sent")
+        self.give_kyc(self.bob_acct, "Bob")
+
+        self.assertEqual(
+            self.client.get(self.settlement_confirmation_url(txn)).status_code, 200
+        )
+
+        self.client.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_settled")
+
+        resp = self.client.get(self.settlement_confirmation_url(txn), follow=True)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.redirect_chain, "a settled request must not re-confirm")
+        self.assertIn("already been processed", resp.content.decode())
+        self.assertNotIn('name="password"', resp.content.decode())
+
     def test_transfer_confirmation_get_is_refused_once_completed(self):
         """Browser Back after a successful transfer used to show a live form."""
         txn = self.create_transfer(amount="100.00")
@@ -555,3 +580,32 @@ class ReplayGuardTests(MoneyMovementTestBase):
         self.assertIn("already been processed", resp.content.decode())
         # And the password form must be gone from the response.
         self.assertNotIn('name="password"', resp.content.decode())
+
+
+# =====================================================================
+# Phase 1.7 (F3)  settlement must not 500 on a payee with no KYC
+# =====================================================================
+class SettlementMessageTests(MoneyMovementTestBase):
+
+    def test_settlement_succeeds_when_payee_has_no_kyc(self):
+        """F3: the success message read account.user.kyc.full_name directly.
+
+        Template lookups silence RelatedObjectDoesNotExist; direct Python
+        attribute access does not, so a payee without a KYC row turned a
+        completed settlement into a 500 *after* the money had already moved.
+        """
+        txn = self.create_request(amount="100.00", status="request_sent")
+        self.assertFalse(hasattr(self.bob, "kyc"), "precondition: bob has no KYC row")
+
+        resp = self.client.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        self.assertNotEqual(resp.status_code, 500, "settlement 500'd on a KYC-less payee")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("settlement-completed", resp["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_settled")
+        self.assertEqual(self.balances(), (Decimal("900.00"), Decimal("600.00")))
+
+        # And the completion page still renders with the username fallback.
+        done = self.client.get(resp["Location"])
+        self.assertEqual(done.status_code, 200)

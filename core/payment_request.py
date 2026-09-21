@@ -149,6 +149,14 @@ def Settlement_confirmation(request,account_number,transaction_id):
         return redirect("core:transactions")
     account = Account.objects.get(account_number=account_number)
 
+    # Phase 1.7 (F4): mirror the TransferConfirmation guard from Phase 1.6. Only a
+    # request that has actually been sent is settleable, so a finished one must not
+    # offer the password form again. transaction_list.html only renders the Settle
+    # button for "request_sent", so this closes the direct-URL path behind that.
+    if transaction.status != "request_sent":
+        messages.warning(request, "This settlement has already been processed.")
+        return redirect("core:transaction-detail", transaction.transaction_id)
+
     context = {
             "account": account,  # Pass the account object
             "transaction": transaction,
@@ -223,7 +231,15 @@ def Settlement_processing(request,account_number,transaction_id):
                 messages.warning(request,"Insufficient Funds, Fund your account and try again.")
                 return redirect("core:settlement-confirmation", account.account_number, transaction.transaction_id)
 
-            messages.success(request,f"Settled to {account.user.kyc.full_name} was successfull.")
+            # Phase 1.7 (F3): a payee with no KYC row made this line raise
+            # RelatedObjectDoesNotExist *inside the view*, which is a hard 500 --
+            # Django silences that exception for template lookups, but this is
+            # direct Python attribute access. Fall back to the username.
+            holder = (
+                getattr(getattr(account.user, "kyc", None), "full_name", None)
+                or account.user.username
+            )
+            messages.success(request, f"Settled to {holder} was successful.")
             return redirect("core:settlement-completed", account.account_number, transaction.transaction_id)
         else:
             messages.warning(request,"Incorrect password.")
