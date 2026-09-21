@@ -1,71 +1,111 @@
 {% extends "partials/base.html" %}
 {% block content %}
-{% load static %}
-    <!-- Banner Section start -->
-    <section class="banner-section index">
-        <div class="overlay">
-            <div class="banner-content">
-                <div class="container wow fadeInUp">
-                    <div class="content-shape">
-                    </div>
-                    <div class="row justify-content-between align-items-center">
-                        <div class="col-lg-5 col-md-6">
-                            <div class="main-content">
-                                <div class="top-area section-text">
-                                    <!-- <h5 class="sub-title">Trusted by over 3M customers</h5> -->
-                                    <h1 class="title" font="">Pay Anyone, Anywhere</h1>
-                                    <p class="xlr">Quickly and easily send, receive and request money online with O-Banking. Get a customised solution to fit your business needs.</p>
-                                </div>
-                                <div class="bottom-area d-xxl-flex">
-                                    <a href="{% url 'userauths:sign-up' %}" class="cmn-btn">Open a Free Account</a>
-                                    <a class="cmn-btn active mfp-iframe popupvideo" href="https://www.youtube.com/watch?v=Djz8Nc0Qxwk">See How it Works</a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+
+<div class="container-xl py-5">
+
+    <!-- Hero -->
+    <div class="row justify-content-center text-center py-4">
+        <div class="col-lg-8">
+            <h1 class="display-6 fw-bold mb-3">Send, receive and request money</h1>
+            <p class="lead text-secondary mb-4">
+                O-Banking is an academic banking demo built with Django. Create an account,
+                pass an identity check, then move money between accounts &mdash; every transfer
+                confirmed by re-entering your password. No real funds are involved.
+            </p>
+            <div class="d-flex justify-content-center gap-2">
+                <a href="{% url 'userauths:sign-up' %}" class="btn btn-primary btn-lg">Open a Free Account</a>
+                <a href="{% url 'userauths:sign-in' %}" class="btn btn-outline-primary btn-lg">Sign In</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- What the app actually does -->
+    <div class="row row-cards mt-4">
+        <div class="col-md-6 col-lg-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="mb-2 text-primary"><i class="ti ti-send fs-1"></i></div>
+                    <h2 class="h3 mb-2">Transfers</h2>
+                    <p class="text-secondary mb-0">
+                        Send money to another O-Banking account by account number or ID. Each
+                        transfer is confirmed by re-entering your password before it settles.
+                    </p>
                 </div>
             </div>
         </div>
-        <div class="counter-section">
-            <div class="container wow fadeInUp">
-                <div class="row cus-mar">
-                    <div class="col-xl-3 col-md-3 col-sm-6">
-                        <div class="single-area d-flex align-items-center justify-content-center">
-                            <div class="text-area text-center">
-                                <h2><span class="counter">50</span><span>+</span></h2>
-                                <p>Supported Currencies</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-xl-3 col-md-3 col-sm-6">
-                        <div class="single-area d-flex align-items-center justify-content-center">
-                            <div class="text-area text-center">
-                                <h2><span class="counter">100</span><span>+</span></h2>
-                                <p>Available Countries</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-xl-3 col-md-3 col-sm-6">
-                        <div class="single-area d-flex align-items-center justify-content-center">
-                            <div class="text-area text-center">
-                                <h2><span class="counter">70</span><span>+</span></h2>
-                                <p>Payment Methods</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-xl-3 col-md-3 col-sm-6">
-                        <div class="single-area d-flex align-items-center justify-content-center">
-                            <div class="text-area text-center">
-                                <h2><span class="counter">7</span><span>/</span><span class="counter">24</span><span>+</span></h2>
-                                <p>Support Team</p>
-                            </div>
-                        </div>
-                    </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="mb-2 text-primary"><i class="ti ti-inbox fs-1"></i></div>
+                    <h2 class="h3 mb-2">Payment requests</h2>
+                    <p class="text-secondary mb-0">
+                        Ask another user for money. Requests appear in their list and can be
+                        settled or cancelled before they are paid.
+                    </p>
                 </div>
             </div>
         </div>
-    </section>
-    <!-- Banner Section end -->
+        <div class="col-md-6 col-lg-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="mb-2 text-primary"><i class="ti ti-id-badge fs-1"></i></div>
+                    <h2 class="h3 mb-2">Identity check</h2>
+                    <p class="text-secondary mb-0">
+                        Upload an identity document and a signature. The banking screens stay
+                        locked until your details are on file.
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="mb-2 text-primary"><i class="ti ti-list-details fs-1"></i></div>
+                    <h2 class="h3 mb-2">Transaction history</h2>
+                    <p class="text-secondary mb-0">
+                        Every movement is listed with its status, so it is clear what has
+                        completed and what is still pending.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
 
+    <!-- Plain project facts -->
+    <div class="row row-cards mt-4">
+        <div class="col-6 col-lg-3 text-center">
+            <div class="h1 mb-1">USD</div>
+            <div class="text-secondary">Single currency, no FX</div>
+        </div>
+        <div class="col-6 col-lg-3 text-center">
+            <div class="h1 mb-1">2</div>
+            <div class="text-secondary">Steps to confirm a transfer</div>
+        </div>
+        <div class="col-6 col-lg-3 text-center">
+            <div class="h1 mb-1">0</div>
+            <div class="text-secondary">Transaction fees</div>
+        </div>
+        <div class="col-6 col-lg-3 text-center">
+            <div class="h1 mb-1">KYC</div>
+            <div class="text-secondary">Required before banking</div>
+        </div>
+    </div>
 
-{% endblock content %} 
+    <!-- Honest note about what this is -->
+    <div class="row justify-content-center mt-5">
+        <div class="col-lg-8">
+            <div class="alert alert-info mb-0" role="alert">
+                <h2 class="h3 mb-2">About this project</h2>
+                <p class="mb-0">
+                    O-Banking is a final-year (PFA) coursework project. It is a demonstration,
+                    not a bank: it has no connection to any payment network, it holds no real
+                    money, and accounts are limited to this installation. Balances start at zero
+                    and only move between registered users.
+                </p>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+{% endblock content %}
