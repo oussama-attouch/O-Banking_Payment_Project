@@ -12,7 +12,7 @@ are testing.
 """
 from decimal import Decimal
 
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import get_resolver, reverse
 
 from account.models import Account
@@ -24,6 +24,24 @@ PASSWORD = "pw-Phase-1.5-test"
 
 class MoneyMovementTestBase(TestCase):
     """alice (sender) and bob (recipient) are funded; carol is unrelated."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Deployment hardening follows DEBUG, so with DJANGO_DEBUG unset the SSL
+        # redirect and secure cookies are on. A plain-HTTP test client cannot
+        # send a secure cookie, so relax those three for the whole suite.
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
 
     def setUp(self):
         self.alice, self.alice_acct = self._make_user("alice", "1000.00")

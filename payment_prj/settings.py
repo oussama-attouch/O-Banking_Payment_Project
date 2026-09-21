@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/3.1/ref/settings/
 from pathlib import Path
 import os
 
+from django.core.exceptions import ImproperlyConfigured
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -20,16 +22,40 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/3.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'i-@0c@dykyezfva^zgn-+g4f_=7q^0$!z@wj%sran&z#(=wp$w'
+def _env_bool(name, default=False):
+    """Read a boolean from the environment. Unset or unrecognised -> default."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-ALLOWED_HOSTS = []
+# Environment configuration.
+#
+# Nothing here loads a .env file: read the variables straight from the process
+# environment. See .env.example for the full list and how to generate a key.
+
+DEBUG = _env_bool("DJANGO_DEBUG", False)
+
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    if DEBUG:
+        # Local development only. Never reached when DEBUG is off.
+        SECRET_KEY = "django-insecure-local-development-only-do-not-deploy"
+    else:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY is not set. Export it, or set DJANGO_DEBUG=1 for "
+            "local development. See .env.example."
+        )
+
+# Comma-separated. The localhost defaults keep `runserver` usable out of the box;
+# any real hostname has to be listed here explicitly.
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
+    if host.strip()
+]
 
 
 # Application definition
@@ -43,6 +69,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.humanize',
+    # Third-party app required by account/admin.py's ImportExportModelAdmin
+    'import_export',
     # Custom Apps
     'core',
     'userauths',
@@ -133,18 +161,48 @@ LOGOUT_REDIRECT_URL = "userauths:sign-in"
 
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
+# collectstatic target. Gitignored, and empty until `manage.py collectstatic` runs.
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 MEDIA_URL= '/media/' 
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 AUTH_USER_MODEL = 'userauths.User'
 
+
+# ---------------------------------------------------------------------------
+# Deployment hardening.
+#
+# All of these follow DEBUG: on whenever DEBUG is off, off for local development
+# so plain http://localhost keeps working. The test suite and the probe harness
+# override them, because a plain-HTTP client cannot send a secure cookie and
+# would be 301-redirected before reaching a view.
+# ---------------------------------------------------------------------------
+
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
+# Deliberately modest HSTS: one hour, and preload explicitly NOT claimed.
+#
+# HSTS is a one-way commitment for a real domain, and preload is inappropriate
+# for a demo that has never been served over TLS -- browsers reject preload
+# below one year, and the preload list is slow and awkward to leave. Keeping
+# SECURE_HSTS_PRELOAD off means django's security.W021 check fires on purpose:
+# that one warning is a documented choice, not an oversight. Raise these to the
+# conventional year + preload only once HTTPS is confirmed working.
+SECURE_HSTS_SECONDS = 0 if DEBUG else 3600
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = False
+
 JAZZMIN_SETTINGS = {
     "site_title": "O-Banking",
     "site_header": "O-Banking",
     "site_brand": "O-Banking",
     # "site_logo": "images/logo.jpn"
-    "copyright": "O-Banking, 2026",
+    # jazzmin renders "Copyright (c) <current year> <this value>", so the year is
+    # deliberately not repeated here.
+    "copyright": "O-Banking",
 }
 
 JAZZMIN_UI_TWEAKS = {

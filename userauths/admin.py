@@ -1,5 +1,8 @@
 from django.contrib import admin
-from userauths.models import User
-# Register your models here.
+from django.contrib.auth.admin import UserAdmin
 
-admin.site.register(User)
+from userauths.models import User
+
+# Registered with UserAdmin rather than a bare ModelAdmin so the admin hashes
+# passwords on save instead of showing the raw hash in a text input.
+admin.site.register(User, UserAdmin)

@@ -9,7 +9,7 @@ silently reverted balance changes made through a different Account instance.
 """
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from account.models import Account
@@ -19,6 +19,23 @@ PASSWORD = "pw-Phase-1.5-test"
 
 
 class AccountProvisioningTests(TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # See core.tests: hardening follows DEBUG, so the SSL redirect and secure
+        # cookies are on and would break a plain-HTTP test client.
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
 
     def test_new_user_gets_exactly_one_account(self):
         """The surviving receiver: Account.user is a required one-to-one."""

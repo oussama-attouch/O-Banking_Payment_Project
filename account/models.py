@@ -85,9 +85,9 @@ class Account(models.Model):
         ordering = ['-date']
 
  # Define a special method __str__ for the Account model
-        def __str__(self):
+    def __str__(self):
         # Return a formatted string representation of the Account object
-         return f"{self.user}"
+        return f"{self.user}"
 
 # Define the KYC model
 class KYC(models.Model):

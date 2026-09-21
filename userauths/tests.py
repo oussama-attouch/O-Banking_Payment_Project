@@ -6,7 +6,7 @@ view depends on ``request.user.account`` existing.
 """
 from decimal import Decimal
 
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from account.models import Account
@@ -16,6 +16,23 @@ PASSWORD = "pw-Phase-1.5-test"
 
 
 class AuthFlowTests(TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        # See core.tests: hardening follows DEBUG, and a secure session cookie is
+        # never sent back over plain HTTP, which would log every test out.
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
 
     def test_signup_creates_user_and_provisions_an_account(self):
         resp = self.client.post(reverse("userauths:sign-up"), {
