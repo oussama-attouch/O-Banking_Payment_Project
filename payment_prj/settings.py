@@ -140,11 +140,11 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 AUTH_USER_MODEL = 'userauths.User'
 
 JAZZMIN_SETTINGS = {
-    "site_title": "Paylio",
-    "site_header": "Paylio",
-    "site_brand": "Payment Made Easy...",
+    "site_title": "O-Banking",
+    "site_header": "O-Banking",
+    "site_brand": "O-Banking",
     # "site_logo": "images/logo.jpn"
-    "copyright": "Paylio - All Right Reserverd Copyright 2023",
+    "copyright": "O-Banking, 2026",
 }
 
 JAZZMIN_UI_TWEAKS = {

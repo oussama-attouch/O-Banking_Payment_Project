@@ -109,19 +109,6 @@
                                             </a>
                                             <i class="fa-solid fa-caret-right"></i>
                                         </li>
-                                        <li>
-                                            <a href="javascript:void(0)" class="d-flex">
-                                                <div class="img-area">
-                                                    <img src="{% static 'assets/images/user-3.png' %}" class="max-un" alt="image">
-                                                </div>
-                                                <div class="text-area">
-                                                    <p class="mdr">You received a payment of <b>$250.00</b> from Goerge Michael
-                                                    </p>
-                                                    <p class="mdr time-area">Yesterday</p>
-                                                </div>
-                                            </a>
-                                            <i class="fa-solid fa-caret-right"></i>
-                                        </li>
                                     </ul>
                                 </div>
                             </div>
@@ -142,9 +129,8 @@
                                                 <h5>{{kyc.full_name}}</h5>
                                             </a>
                                             <p class="wallet-id">Account No. {{account.account_number}}</p>
-                                            <p class="wallet-id">Psin No. {{account.pin_number}}</p>
                     
-                                        <p>Joinesd:</p>
+                                        <p>Joined:</p>
                                         <span class="mdr"><small>{{account.date|date:"d M, Y"}}</small></span>
                                         </div>
                                     </div>
@@ -234,15 +220,6 @@
                                 </a>
                             </li>
                         </ul>
-                        <div class="pt-120">
-                            <div class="invite-now">
-                                <div class="img-area">
-                                    <img src="{% static 'assets/images/invite-now-illus.png' %}" alt="Image">
-                                </div>
-                                <p>Invite your friend and get $25</p>
-                                <a href="javascript:void(0)" class="cmn-btn">Invite Now</a>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>

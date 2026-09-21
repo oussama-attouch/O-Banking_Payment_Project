@@ -30,29 +30,6 @@
             }
     
     
-            #id_identity_image{
-                background-color: #432f9f;
-                /* border: 1px solid #e2e9f3; */
-                border-radius: 4px;
-                height: 50px;
-                width: 100%;
-                color: #ffffff;
-            }
-            #id_identity_image::file-selector-button{
-                border: none;
-                border-radius: 7px;
-                color: 432f9f;
-                background-color: #ffffff;
-                /* border: 1px solid #595ef1bd; */
-                height: 30px;
-                cursor: pointer;
-                transition: all .25s ease-in;
-            }
-            #id_identity_image::file-selector-button:hover{
-                background-color: #fff;
-                color: #565A90;
-                transition: all .25s ease-in;
-            }
     
     
     
@@ -108,10 +85,6 @@
                                     <li>
                                         <p>Joined:</p>
                                         <span class="mdr">{{request.user.account.date|date:"d M, Y"}}</span>
-                                    </li>
-                                    <li>
-                                        <p>Confirm status:</p>
-                                        <span class="mdr">10%</span>
                                     </li>
                                 </ul>
                             </div>
@@ -179,6 +152,12 @@
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="single-input">
+                                                    <label for="id_nationality">Nationality</label>
+                                                   {{form.nationality}}
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="single-input">
                                                     <label for="fName">State</label>
                                                    {{form.state}}
                                                 </div>
@@ -203,27 +182,20 @@
                                             </div>
                                             <div class="col-md-4">
                                                 <div class="single-input">
+                                                    <label for="id_gender">Gender</label>
                                                    {{form.gender}}
                                                 </div>
                                             </div>
                                             <div class="col-md-4">
                                                 <div class="single-input">
+                                                    <label for="id_marrital_status">Marital Status</label>
                                                    {{form.marrital_status}}
                                                 </div>
                                             </div>
                                             <div class="col-md-4">
                                                 <div class="single-input">
+                                                    <label for="id_identity_type">Identity Type</label>
                                                    {{form.identity_type}}
-                                                </div>
-                                            </div>
-                                            <div class="col-md-6 " style="padding-top: 50px;">
-                                                <div class="single-input">
-                                                    <label for="fName">Select Identity Image</label>
-
-                                                    {{form.identity_image}}
-                                                    {% if kyc.identity_image %}
-                                                        <img src="{{ kyc.identity_image.url }}" style="width: 100%; height: 200px; border-radius: 10px; object-fit: cover; padding-top: 10px;" alt="">
-                                                    {% endif %}
                                                 </div>
                                             </div>
                                             <div class="col-md-6" style="padding-top: 50px;">
