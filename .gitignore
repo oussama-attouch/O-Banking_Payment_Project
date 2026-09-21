@@ -17,3 +17,8 @@ media/
 
 # collectstatic output (STATIC_ROOT)
 staticfiles/
+
+# Tabler source monorepo the developer extracted for reference (build output,
+# not committed - the vendored prebuilt subset lives in static/tabler/).
+tabler--tabler-core-1.5.1/
+tabler-source/
