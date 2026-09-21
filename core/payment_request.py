@@ -7,6 +7,7 @@ from django.contrib import messages  # Import messages module for user notificat
 from core.models import Transaction  # Import the Transaction model from the 'core' app
 from decimal import Decimal  # Import the Decimal class for precise decimal arithmetic
 from core.security import AmountError, find_party_transaction, parse_amount
+from django.views.decorators.http import require_POST
 
 # Require authentication for this view using the @login_required decorator
 @login_required
@@ -225,6 +226,7 @@ def SettlementCompleted(request,transaction_id,account_number):
 
 
 @login_required
+@require_POST
 def DeletePaymentRequest(request,account_number,transaction_id):
     # Scoped to the requesting user's own transactions (see core.security).
     # Deletion itself is still restricted to the transaction's owner below.

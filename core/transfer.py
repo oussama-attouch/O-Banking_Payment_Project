@@ -59,6 +59,13 @@ def process_amount_transfer(request, account_number):
     sender_account = sender.account  # Get the currently logged in user's account that would send the money
     receiver_account = account  # Get the recipient's account that would receive the money
 
+    # Refuse to send money to yourself. Without this guard the debit and the
+    # credit land on the same account row, so the confirmation step would
+    # complete a "transfer" that moves nothing.
+    if account.pk == sender_account.pk:
+        messages.warning(request, "You cannot transfer money to your own account.")
+        return redirect("core:search-account")
+
     if request.method == "POST":
         try:
             amount = parse_amount(request.POST.get("amount-send"), field_name="Amount to send")
@@ -144,6 +151,7 @@ def TransferProcess(request, account_number, transaction_id):
         pin_number = request.POST.get("pin-number")
 
         if pin_number == sender_account.account_pin:
+            insufficient = False
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
                 # so two concurrent transfers in opposite directions cannot
@@ -157,15 +165,27 @@ def TransferProcess(request, account_number, transaction_id):
                 sender_row = locked[str(sender_account.pk)]
                 receiver_row = locked[str(account.pk)]
 
-                transaction.status = "completed"
-                transaction.save()
+                # The balance was only checked when the transaction was created.
+                # Re-check it against the LOCKED row, because the sender may have
+                # spent the money in the meantime. Rejecting here leaves the
+                # transaction in "processing" so the user can fund the account
+                # and retry the same transfer.
+                if sender_row.account_balance < transaction.amount:
+                    insufficient = True
+                else:
+                    transaction.status = "completed"
+                    transaction.save()
 
-                # Remove the amount from the sender, add it to the receiver.
-                sender_row.account_balance -= transaction.amount
-                sender_row.save()
+                    # Remove the amount from the sender, add it to the receiver.
+                    sender_row.account_balance -= transaction.amount
+                    sender_row.save()
 
-                receiver_row.account_balance += transaction.amount
-                receiver_row.save()
+                    receiver_row.account_balance += transaction.amount
+                    receiver_row.save()
+
+            if insufficient:
+                messages.warning(request, "Insufficient Funds.")
+                return redirect("core:transfer-confirmation", account.account_number, transaction.transaction_id)
 
             messages.success(request, "Transfer Successfull.")
             return redirect("core:transfer-completed", account.account_number, transaction.transaction_id)
