@@ -183,6 +183,7 @@ def Settlement_processing(request,account_number,transaction_id):
         if request.user.check_password(submitted_password):
             insufficient = False
             already_processed = False
+            mismatch = False
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
                 # so two concurrent settlements in opposite directions cannot
@@ -207,7 +208,21 @@ def Settlement_processing(request,account_number,transaction_id):
                     .first()
                 )
 
-                if locked_txn is None or locked_txn.status != "request_sent":
+                # Phase 1.8: URL/transaction mismatch guard.
+                # A settlement is paid by the stored reciever and credited to
+                # the stored sender (the requester), so the URL must name the
+                # requester's account and the caller must be the payer. Without
+                # this, the payer could POST the URL with a third party's
+                # account_number and redirect the credit away from the requester.
+                if locked_txn is None:
+                    already_processed = True
+                elif (
+                    locked_txn.sender_account_id != account.pk
+                    or locked_txn.reciever_account_id != sender_account.pk
+                    or locked_txn.reciever_id != request.user.id
+                ):
+                    mismatch = True
+                elif locked_txn.status != "request_sent":
                     already_processed = True
                 # Re-checked against the LOCKED row, so the check and the debit
                 # cannot be raced by a concurrent balance change.
@@ -222,6 +237,10 @@ def Settlement_processing(request,account_number,transaction_id):
 
                     locked_txn.status = "request_settled"
                     locked_txn.save()
+
+            if mismatch:
+                messages.warning(request, "This transaction does not match the account in the link.")
+                return redirect("core:transactions")
 
             if already_processed:
                 messages.warning(request, "This settlement has already been processed.")

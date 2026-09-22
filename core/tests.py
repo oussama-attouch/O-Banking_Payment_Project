@@ -82,16 +82,22 @@ class MoneyMovementTestBase(TestCase):
             args=[self.bob_acct.account_number, txn.transaction_id],
         )
 
+    # Phase 1.8: the settlement URL names the REQUESTER's account, because that
+    # is what the UI renders -- transaction_list.html draws the Settle link for
+    # the stored ``reciever`` and passes ``s.sender.account.account_number``.
+    # create_request() stores alice as sender (requester) and bob as reciever
+    # (the party who owes), so both settlement URLs carry alice's account number
+    # and the acting client must be bob. See payer_client().
     def settlement_confirmation_url(self, txn):
         return reverse(
             "core:settlement-confirmation",
-            args=[self.bob_acct.account_number, txn.transaction_id],
+            args=[self.alice_acct.account_number, txn.transaction_id],
         )
 
     def settlement_process_url(self, txn):
         return reverse(
             "core:settlement-processing",
-            args=[self.bob_acct.account_number, txn.transaction_id],
+            args=[self.alice_acct.account_number, txn.transaction_id],
         )
 
     def create_transfer(self, amount="10.00", status="processing"):
@@ -109,8 +115,20 @@ class MoneyMovementTestBase(TestCase):
         )
 
     def carol_client(self):
+        """A client logged in as carol, who is a party to nothing."""
         client = Client()
         client.force_login(self.carol)
+        return client
+
+    def payer_client(self):
+        """A client logged in as bob, the stored ``reciever`` who pays a request.
+
+        Settlement is paid by the party recorded as ``reciever`` and credited to
+        the party recorded as ``sender`` (the requester), so bob is the actor for
+        a request created by ``create_request``.
+        """
+        client = Client()
+        client.force_login(self.bob)
         return client
 
     def csrf_token(self, client):
@@ -523,18 +541,20 @@ class ReplayGuardTests(MoneyMovementTestBase):
 
     def test_settlement_processing_rejects_already_completed_transaction(self):
         txn = self.create_request(amount="100.00", status="request_sent")
-        self.give_kyc(self.bob_acct, "Bob")
+        self.give_kyc(self.alice_acct, "Alice")  # alice is credited, so her KYC is read
+        payer = self.payer_client()
 
-        first = self.client.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        first = payer.post(self.settlement_process_url(txn), {"password": PASSWORD})
         self.assertEqual(first.status_code, 302)
         self.assertIn("settlement-completed", first["Location"])
 
         txn.refresh_from_db()
         self.assertEqual(txn.status, "request_settled")
         settled_balances = self.balances()
-        self.assertEqual(settled_balances, (Decimal("900.00"), Decimal("600.00")))
+        # bob (reciever) pays, alice (sender/requester) is credited.
+        self.assertEqual(settled_balances, (Decimal("1100.00"), Decimal("400.00")))
 
-        replay = self.client.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        replay = payer.post(self.settlement_process_url(txn), {"password": PASSWORD})
         self.assertNotEqual(replay.status_code, 500, "a replayed settlement must not 500")
         self.assertEqual(replay.status_code, 302)
 
@@ -547,17 +567,18 @@ class ReplayGuardTests(MoneyMovementTestBase):
     def test_settlement_confirmation_get_is_refused_once_completed(self):
         """F4: mirror of the TransferConfirmation guard from Phase 1.6."""
         txn = self.create_request(amount="100.00", status="request_sent")
-        self.give_kyc(self.bob_acct, "Bob")
+        self.give_kyc(self.alice_acct, "Alice")
+        payer = self.payer_client()
 
         self.assertEqual(
-            self.client.get(self.settlement_confirmation_url(txn)).status_code, 200
+            payer.get(self.settlement_confirmation_url(txn)).status_code, 200
         )
 
-        self.client.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        payer.post(self.settlement_process_url(txn), {"password": PASSWORD})
         txn.refresh_from_db()
         self.assertEqual(txn.status, "request_settled")
 
-        resp = self.client.get(self.settlement_confirmation_url(txn), follow=True)
+        resp = payer.get(self.settlement_confirmation_url(txn), follow=True)
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.redirect_chain, "a settled request must not re-confirm")
         self.assertIn("already been processed", resp.content.decode())
@@ -583,6 +604,102 @@ class ReplayGuardTests(MoneyMovementTestBase):
 
 
 # =====================================================================
+# Phase 1.8  URL/transaction mismatch must not redirect the credit
+# =====================================================================
+class TransferDirectionGuardTests(MoneyMovementTestBase):
+    """The account_number in the confirmation URL must be the transaction's.
+
+    Both ``TransferProcess`` and ``Settlement_processing`` took the credited
+    account straight from the URL, so a party could POST the confirmation link
+    with any account number and send the money somewhere the transaction row
+    does not record. These tests pin both the rejection and the happy path, so
+    the guard cannot be tightened into over-strictness unnoticed.
+    """
+
+    MISMATCH_MESSAGE = "This transaction does not match the account in the link."
+
+    def test_transfer_rejects_url_account_mismatch(self):
+        """alice's own transfer, with carol's account number in the URL."""
+        txn = self.create_transfer(amount="100.00")
+        url = reverse(
+            "core:transfer-process",
+            args=[self.carol_acct.account_number, txn.transaction_id],
+        )
+
+        resp = self.client.post(url, {"password": PASSWORD}, follow=True)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(self.MISMATCH_MESSAGE, resp.content.decode())
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "processing", "a mismatch must not complete the transfer")
+        self.assertEqual(
+            (
+                self.balance(self.alice_acct),
+                self.balance(self.bob_acct),
+                self.balance(self.carol_acct),
+            ),
+            (Decimal("1000.00"), Decimal("500.00"), Decimal("250.00")),
+            "a mismatch must not move money anywhere",
+        )
+
+    def test_settlement_rejects_url_account_mismatch(self):
+        """The payer settles, but the URL names a third party's account."""
+        txn = self.create_request(amount="100.00", status="request_sent")
+        payer = self.payer_client()
+        url = reverse(
+            "core:settlement-processing",
+            args=[self.carol_acct.account_number, txn.transaction_id],
+        )
+
+        resp = payer.post(url, {"password": PASSWORD}, follow=True)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(self.MISMATCH_MESSAGE, resp.content.decode())
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_sent", "a mismatch must not settle the request")
+        self.assertEqual(
+            (
+                self.balance(self.alice_acct),
+                self.balance(self.bob_acct),
+                self.balance(self.carol_acct),
+            ),
+            (Decimal("1000.00"), Decimal("500.00"), Decimal("250.00")),
+            "a mismatch must not move money anywhere",
+        )
+
+    def test_transfer_still_completes_when_accounts_match(self):
+        """The happy path: alice confirms her own transfer to bob's account."""
+        txn = self.create_transfer(amount="100.00")
+
+        resp = self.client.post(self.transfer_process_url(txn), {"password": PASSWORD})
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("transfer-completed", resp["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "completed")
+        self.assertEqual(
+            self.balances(), (Decimal("900.00"), Decimal("600.00"))
+        )
+        self.assertEqual(self.balance(self.carol_acct), Decimal("250.00"))
+
+    def test_settlement_still_completes_when_accounts_match(self):
+        """The happy path: bob pays, alice (the requester) is credited."""
+        txn = self.create_request(amount="100.00", status="request_sent")
+        payer = self.payer_client()
+
+        resp = payer.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("settlement-completed", resp["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_settled")
+        self.assertEqual(
+            self.balances(), (Decimal("1100.00"), Decimal("400.00"))
+        )
+        self.assertEqual(self.balance(self.carol_acct), Decimal("250.00"))
+
+
+# =====================================================================
 # Phase 1.7 (F3)  settlement must not 500 on a payee with no KYC
 # =====================================================================
 class SettlementMessageTests(MoneyMovementTestBase):
@@ -593,19 +710,21 @@ class SettlementMessageTests(MoneyMovementTestBase):
         Template lookups silence RelatedObjectDoesNotExist; direct Python
         attribute access does not, so a payee without a KYC row turned a
         completed settlement into a 500 *after* the money had already moved.
+        The payee -- the party credited -- is the requester, alice.
         """
         txn = self.create_request(amount="100.00", status="request_sent")
-        self.assertFalse(hasattr(self.bob, "kyc"), "precondition: bob has no KYC row")
+        self.assertFalse(hasattr(self.alice, "kyc"), "precondition: alice has no KYC row")
+        payer = self.payer_client()
 
-        resp = self.client.post(self.settlement_process_url(txn), {"password": PASSWORD})
+        resp = payer.post(self.settlement_process_url(txn), {"password": PASSWORD})
         self.assertNotEqual(resp.status_code, 500, "settlement 500'd on a KYC-less payee")
         self.assertEqual(resp.status_code, 302)
         self.assertIn("settlement-completed", resp["Location"])
 
         txn.refresh_from_db()
         self.assertEqual(txn.status, "request_settled")
-        self.assertEqual(self.balances(), (Decimal("900.00"), Decimal("600.00")))
+        self.assertEqual(self.balances(), (Decimal("1100.00"), Decimal("400.00")))
 
         # And the completion page still renders with the username fallback.
-        done = self.client.get(resp["Location"])
+        done = payer.get(resp["Location"])
         self.assertEqual(done.status_code, 200)

@@ -165,6 +165,7 @@ def TransferProcess(request, account_number, transaction_id):
         if request.user.check_password(submitted_password):
             insufficient = False
             already_processed = False
+            mismatch = False
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
                 # so two concurrent transfers in opposite directions cannot
@@ -190,7 +191,21 @@ def TransferProcess(request, account_number, transaction_id):
                     .first()
                 )
 
-                if locked_txn is None or locked_txn.status != "processing":
+                # Phase 1.8: URL/transaction mismatch guard.
+                # The account_number in the URL must be the transaction's
+                # intended receiver account. Without this, either party could
+                # POST the URL with a different account_number and redirect the
+                # credit to a third party while the transaction row kept
+                # recording the original counterparty.
+                if locked_txn is None:
+                    already_processed = True
+                elif (
+                    locked_txn.reciever_account_id != account.pk
+                    or locked_txn.sender_account_id != sender_account.pk
+                    or locked_txn.sender_id != request.user.id
+                ):
+                    mismatch = True
+                elif locked_txn.status != "processing":
                     already_processed = True
                 # The balance was only checked when the transaction was created.
                 # Re-check it against the LOCKED row, because the sender may have
@@ -209,6 +224,10 @@ def TransferProcess(request, account_number, transaction_id):
 
                     receiver_row.account_balance += locked_txn.amount
                     receiver_row.save()
+
+            if mismatch:
+                messages.warning(request, "This transaction does not match the account in the link.")
+                return redirect("core:transactions")
 
             if already_processed:
                 messages.warning(request, "This transfer has already been processed.")
