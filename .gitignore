@@ -22,3 +22,14 @@ staticfiles/
 # not committed - the vendored prebuilt subset lives in static/tabler/).
 tabler--tabler-core-1.5.1/
 tabler-source/
+
+# Developer harness and one-off scripts.
+# _modernization-scripts/ holds the phase-by-phase verification probes; they are
+# dev tooling, not part of the application.
+_modernization-scripts/
+fund_account.py
+
+# Database backups. `*.sqlite3` above already covers these (the real one is
+# db-before-1b.sqlite3); db.sqlite3.pre-1b is listed defensively in case the
+# backup is ever renamed to that.
+db.sqlite3.pre-1b

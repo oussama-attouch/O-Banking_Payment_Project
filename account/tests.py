@@ -8,12 +8,15 @@ login via ``update_last_login``) wrote that cached row back verbatim and
 silently reverted balance changes made through a different Account instance.
 """
 from decimal import Decimal
+from io import BytesIO
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
+from PIL import Image
 
 from account import analytics
 from account.models import Account, KYC
@@ -21,6 +24,18 @@ from core.models import Transaction
 from userauths.models import User
 
 PASSWORD = "pw-Phase-1.5-test"
+
+
+def png_bytes():
+    """A real 1x1 PNG.
+
+    ``KYCForm.image`` and ``.signature`` are ImageFields, so Pillow validates
+    whatever is uploaded -- arbitrary bytes would be rejected by the form rather
+    than reaching the view.
+    """
+    buffer = BytesIO()
+    Image.new("RGB", (1, 1), "white").save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 class AccountProvisioningTests(TestCase):
@@ -462,3 +477,53 @@ class DashboardAnalyticsTests(DashboardAnalyticsTestBase):
                     len(captured), expected,
                     "%s used %d queries, expected %d" % (name, len(captured), expected),
                 )
+
+
+# =====================================================================
+# Phase 3a  the kyc_submitted flag must become truthful
+# =====================================================================
+class KYCSubmissionFlagTests(DashboardAnalyticsTestBase):
+    """``Account.kyc_submitted`` used to be declared but never written.
+
+    Nothing in the application set it, so it read False for a user with a
+    complete KYC row, and only ``analytics.get_kyc_status`` compensated (by
+    treating row existence as the signal). Submitting the form now sets it.
+    """
+
+    def kyc_payload(self):
+        return {
+            "full_name": "Alice Person",
+            "nationality": "MA",
+            "marrital_status": "single",
+            "gender": "male",
+            "identity_type": "passport",
+            "date_of_birth": "1990-01-01",
+            "country": "Morocco",
+            "state": "Casablanca",
+            "city": "Casablanca",
+            "mobile": "0600000000",
+            "fax": "0522000000",
+            "image": SimpleUploadedFile("id.png", png_bytes(), content_type="image/png"),
+            "signature": SimpleUploadedFile("sig.png", png_bytes(), content_type="image/png"),
+        }
+
+    def test_kyc_submission_sets_submitted_flag(self):
+        # alice is created by the base fixture WITHOUT a KYC row, so the flag
+        # starts false and the account is genuinely un-submitted.
+        self.assertFalse(Account.objects.get(pk=self.alice_acct.pk).kyc_submitted)
+
+        response = self.client.post(
+            reverse("account:kyc-reg"), self.kyc_payload(), follow=True
+        )
+        self.assertEqual(response.status_code, 200)
+
+        account = Account.objects.get(pk=self.alice_acct.pk)
+        self.assertTrue(
+            account.kyc_submitted,
+            "submitting the KYC form must set Account.kyc_submitted",
+        )
+        self.assertFalse(
+            account.kyc_confirmed,
+            "kyc_confirmed is an admin/compliance action and must stay false",
+        )
+        self.assertTrue(KYC.objects.filter(user=self.alice).exists())

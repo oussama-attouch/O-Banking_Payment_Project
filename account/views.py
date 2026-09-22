@@ -158,6 +158,14 @@ def kyc_registration(request):
             new_form.user = user
             new_form.account = account
             new_form.save()
+
+            # Phase 3a: record that this account has filed its details. The flag
+            # was declared on the model but never written by anything, so it read
+            # False even for a user with a complete KYC row. kyc_confirmed is
+            # deliberately left alone -- confirming identity is an admin action,
+            # not something the submitter can assert.
+            Account.objects.filter(pk=account.pk).update(kyc_submitted=True)
+
             # Show a success message and redirect to the account dashboard
             messages.success(request, "KYC Form submitted successfully. It's now under review.")
             return redirect("account:account")
