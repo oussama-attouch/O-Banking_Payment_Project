@@ -761,6 +761,130 @@ class TransferDirectionGuardTests(MoneyMovementTestBase):
 
 
 # =====================================================================
+# Phase 1.10  the remaining .get(account_number=...) sites
+# =====================================================================
+class UnknownAccountSweepTests(MoneyMovementTestBase):
+    """Every payment_request view used to 500 on an unknown account number.
+
+    Looking an account up with ``.get()`` raises ``Account.DoesNotExist``
+    for an account that was never issued, so these URLs crashed instead of
+    rejecting. Phase 1.9 fixed ``Settlement_processing``; this covers the other
+    eight. The number below carries ``0``, which is outside the generator's
+    alphabet ("1234567890"), so it can never be issued.
+    """
+
+    MISSING = "2170000000000"
+
+    def setUp(self):
+        super().setUp()
+        self.assertFalse(
+            Account.objects.filter(account_number=self.MISSING).exists(),
+            "precondition: the account number must not exist",
+        )
+
+    def _assert_rejected(self, resp, label):
+        self.assertNotEqual(resp.status_code, 500, "%s returned 500" % label)
+        self.assertEqual(resp.status_code, 302, "%s returned %s" % (label, resp.status_code))
+
+    def test_amount_transfer_process_unknown_account_does_not_500(self):
+        """The transfer-side twin: core/transfer.py::process_amount_transfer.
+
+        Added with the same authorisation as the payment_request sweep, because
+        this view's unguarded .get() was the last reachable 500 of the family.
+        """
+        before = self.transfer_count()
+        resp = self.client.post(
+            reverse("core:amount-transfer-process", args=[self.MISSING]),
+            {"amount-send": "10.00", "description": "x"},
+        )
+        self._assert_rejected(resp, "amount-transfer-process")
+        self.assertEqual(
+            self.transfer_count(), before,
+            "no transfer may be created for an unknown account",
+        )
+
+    def test_amount_request_unknown_account_does_not_500(self):
+        resp = self.client.get(reverse("core:amount-request", args=[self.MISSING]))
+        self._assert_rejected(resp, "amount-request")
+        self.assertEqual(resp["Location"], reverse("core:transactions"))
+
+    def test_amount_request_process_unknown_account_does_not_500(self):
+        before = self.transfer_count()
+        resp = self.client.post(
+            reverse("core:amount-request-process", args=[self.MISSING]),
+            {"amount-request": "10.00", "description": "x"},
+        )
+        self._assert_rejected(resp, "amount-request-process")
+        self.assertEqual(
+            Transaction.objects.filter(transaction_type="request").count(), 0,
+            "no request may be created for an unknown account",
+        )
+        self.assertEqual(self.transfer_count(), before)
+
+    def test_amount_request_confirmation_unknown_account_does_not_500(self):
+        txn = self.create_request()
+        resp = self.client.get(
+            reverse("core:amount-request-confirmation", args=[self.MISSING, txn.transaction_id])
+        )
+        self._assert_rejected(resp, "amount-request-confirmation")
+
+    def test_amount_request_final_process_unknown_account_does_not_500(self):
+        txn = self.create_request(status="request_processing")
+        resp = self.client.post(
+            reverse("core:amount-request-final-process", args=[self.MISSING, txn.transaction_id]),
+            {"password": PASSWORD},
+        )
+        self._assert_rejected(resp, "amount-request-final-process")
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_processing", "the request must not be sent")
+
+    def test_request_completed_unknown_account_does_not_500(self):
+        txn = self.create_request()
+        resp = self.client.get(
+            reverse("core:amount-request-completed", args=[self.MISSING, txn.transaction_id])
+        )
+        self._assert_rejected(resp, "amount-request-completed")
+
+    def test_settlement_confirmation_unknown_account_does_not_500(self):
+        txn = self.create_request(status="request_sent")
+        resp = self.client.get(
+            reverse("core:settlement-confirmation", args=[self.MISSING, txn.transaction_id])
+        )
+        self._assert_rejected(resp, "settlement-confirmation")
+
+    def test_settlement_completed_unknown_account_does_not_500(self):
+        txn = self.create_request(status="request_settled")
+        resp = self.client.get(
+            reverse("core:settlement-completed", args=[self.MISSING, txn.transaction_id])
+        )
+        self._assert_rejected(resp, "settlement-completed")
+
+    def test_delete_request_unknown_account_does_not_500(self):
+        """The view is @require_POST, so only a POST can reach the guard.
+
+        The GET half of this test pins that the sweep did not weaken
+        ``@require_POST``: a GET must still be refused with 405 before the body
+        runs, so it never reaches the new account guard at all.
+        """
+        txn = self.create_request()
+
+        get = self.client.get(
+            reverse("core:delete-request", args=[self.alice_acct.account_number, txn.transaction_id])
+        )
+        self.assertEqual(get.status_code, 405, "@require_POST must still refuse GET")
+
+        resp = self.client.post(
+            reverse("core:delete-request", args=[self.MISSING, txn.transaction_id])
+        )
+        self.assertNotEqual(resp.status_code, 500, "delete-request returned 500")
+        self.assertIn(resp.status_code, (302, 405), "unexpected %s" % resp.status_code)
+        self.assertTrue(
+            Transaction.objects.filter(pk=txn.pk).exists(),
+            "the request must not be deleted for an unknown account",
+        )
+
+
+# =====================================================================
 # Phase 1.7 (F3)  settlement must not 500 on a payee with no KYC
 # =====================================================================
 class SettlementMessageTests(MoneyMovementTestBase):

@@ -34,9 +34,16 @@ def searchUsersRequest(request):
 # Define a view to handle payment requests with a specific account number
 @login_required
 def AmountRequest(request, account_number):
-    # Retrieve the account associated with the provided account_number
-    account = Account.objects.get(account_number=account_number)
-    
+    # Phase 1.10: an unknown account_number used to raise Account.DoesNotExist
+    # -- a hard 500 -- before anything could reject it. Same guard as
+    # Settlement_processing (Phase 1.9): an unknown account and an unknown
+    # transaction are reported identically, so this URL cannot be used to test
+    # which account numbers exist.
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
+
     # Create a context dictionary to pass the account data to the template
     context = {
         "account": account,  # Pass the account object
@@ -47,7 +54,10 @@ def AmountRequest(request, account_number):
 
 @login_required
 def AmountRequestProcess(request, account_number):
-    account = Account.objects.get(account_number=account_number)
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
 
     sender = request.user
     reciever = account.user
@@ -89,7 +99,10 @@ def AmountRequestConfirmation(request,account_number,transaction_id):
     if transaction is None:
         messages.warning(request, "Transaction does not exist.")
         return redirect("core:transactions")
-    account = Account.objects.get(account_number=account_number)
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
 
     context = {
         "account": account,  # Pass the account object
@@ -105,7 +118,10 @@ def AmountRequestFinalProcess(request, account_number,transaction_id):
     if transaction is None:
         messages.warning(request, "Transaction does not exist.")
         return redirect("core:transactions")
-    account = Account.objects.get(account_number=account_number)
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
 
     if request.method == "POST":
         submitted_password = request.POST.get("password")
@@ -129,7 +145,10 @@ def RequestCompleted(request,transaction_id,account_number):
     if transaction is None:
         messages.warning(request, "Transaction does not exist.")
         return redirect("core:transactions")
-    account = Account.objects.get(account_number=account_number)
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
 
     context = {
             "account": account,  # Pass the account object
@@ -147,7 +166,10 @@ def Settlement_confirmation(request,account_number,transaction_id):
     if transaction is None:
         messages.warning(request, "Transaction does not exist.")
         return redirect("core:transactions")
-    account = Account.objects.get(account_number=account_number)
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
 
     # Phase 1.7 (F4): mirror the TransferConfirmation guard from Phase 1.6. Only a
     # request that has actually been sent is settleable, so a finished one must not
@@ -285,7 +307,10 @@ def SettlementCompleted(request,transaction_id,account_number):
     if transaction is None:
         messages.warning(request, "Transaction does not exist.")
         return redirect("core:transactions")
-    account = Account.objects.get(account_number=account_number)
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
 
     context = {
             "account": account,  # Pass the account object
@@ -303,7 +328,10 @@ def DeletePaymentRequest(request,account_number,transaction_id):
     if transaction is None:
         messages.warning(request, "Transaction does not exist.")
         return redirect("core:transactions")
-    account = Account.objects.get(account_number=account_number)
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
 
     if request.user == transaction.user:
         transaction.delete()

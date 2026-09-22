@@ -52,7 +52,15 @@ def AmountTransfer(request, account_number):
 
 @login_required
 def process_amount_transfer(request, account_number):
-    account = Account.objects.get(account_number=account_number)
+    # Phase 1.10: .get() raised Account.DoesNotExist -- a hard 500 -- when the
+    # URL named an account that does not exist. Same guard as the payment_request
+    # sweep and as TransferProcess: an unknown account and an unknown transaction
+    # are reported identically, so this URL is not an account-number oracle.
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
+
     sender = request.user  # Get the person that is logged in
     receiver = account.user  # Get the person that is going to receive the money
 
