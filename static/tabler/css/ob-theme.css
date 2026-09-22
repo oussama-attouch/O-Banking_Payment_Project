@@ -1,0 +1,124 @@
+/* O-Banking design layer.
+   Overrides Tabler's neutral palette with a fintech-appropriate one.
+   Loaded after tabler.min.css in both shells. Token-level only:
+   every rule below sets a CSS custom property that Tabler itself reads,
+   so every existing component inherits the change. No component styling,
+   no !important, no layout.
+
+   Four deliberate departures from the first draft of this file, each
+   checked against the vendored tabler.min.css:
+
+   1. --tblr-primary-lighter removed. Tabler 1.5.1 never defines it and
+      never reads it (the real names are --tblr-primary-lt, -darken,
+      -200, -bg-subtle, -border-subtle, -fg, -text-emphasis).
+   2. The body{background-color: ... !important} rule removed. Tabler's
+      own body rule is `body{...background-color:var(--tblr-body-bg)...}`
+      with no !important, so overriding the token is enough -- and this
+      file loads second, so it would win on order anyway.
+   3. .bg-gradient-from-primary{... !important} removed for the same
+      reason: Tabler already declares
+      `.bg-gradient-from-primary{--tblr-gradient-from:var(--tblr-primary)}`,
+      and custom properties resolve lazily, so the hero gradient picks up
+      the new accent without a second declaration.
+   4. The sidebar rule targets --tblr-navbar-bg / --tblr-navbar-border-color
+      instead of background-color / border-right-color. .navbar paints
+      itself from --tblr-navbar-bg, and .navbar-vertical draws its edge
+      with `box-shadow: inset calc(-1 * var(--tblr-navbar-border-width))
+      0 0 0 var(--tblr-navbar-border-color)` -- it has no border-right-width
+      at all, so border-right-color would have been inert.
+   5. --tblr-bg-surface is set alongside --tblr-card-bg in both modes.
+      Tabler's .card rule re-declares `--tblr-card-bg: var(--tblr-bg-surface)`
+      on the element, which shadows the root-level --tblr-card-bg and sends
+      dark cards to Tabler's --tblr-gray-800 (#1f2937) instead of the
+      intended #16161f. Verified in Chrome: before this, the dark card
+      computed to rgb(31, 41, 55); after, rgb(22, 22, 31).
+*/
+
+/* ===== LIGHT MODE ===== */
+:root,
+[data-bs-theme="light"] {
+  /* Accent: purple replaces Tabler's #206bc4 */
+  --tblr-primary: #6c47ff;
+  --tblr-primary-rgb: 108, 71, 255;
+  --tblr-primary-lt: rgba(108, 71, 255, 0.1);
+  --tblr-primary-darken: #5a38e8;
+
+  /* Body: lavender-tinted off-white, not clinical white */
+  --tblr-body-bg: #f7f6fb;
+  --tblr-body-color: #14141a;
+  --tblr-secondary-bg: #ffffff;
+  --tblr-secondary-color: #5a5a6e;
+
+  /* Cards: white with a subtle purple-tinted border */
+  --tblr-card-bg: #ffffff;
+  --tblr-card-color: #14141a;
+  --tblr-card-border-color: rgba(108, 71, 255, 0.1);
+  --tblr-border-color: rgba(108, 71, 255, 0.1);
+  --tblr-border-color-translucent: rgba(108, 71, 255, 0.06);
+
+  /* Tabler's .card rule re-declares `--tblr-card-bg: var(--tblr-bg-surface)`
+     on the element itself, which shadows any root-level --tblr-card-bg. The
+     token that actually reaches a card is therefore --tblr-bg-surface, and it
+     is also Tabler's general surface token (cards, dropdowns, modals, alerts,
+     the horizontal navbar). Both are set here so the two always agree. */
+  --tblr-bg-surface: #ffffff;
+
+  /* Hover/focus rings pick up the accent automatically via --tblr-primary */
+
+  /* Table refinements */
+  --tblr-table-bg: transparent;
+  --tblr-table-color: #14141a;
+  --tblr-table-border-color: rgba(108, 71, 255, 0.08);
+}
+
+/* ===== DARK MODE ===== */
+[data-bs-theme="dark"] {
+  /* Accent: slightly lighter for contrast on dark bg */
+  --tblr-primary: #8b6bff;
+  --tblr-primary-rgb: 139, 107, 255;
+  --tblr-primary-lt: rgba(139, 107, 255, 0.15);
+  --tblr-primary-darken: #6c47ff;
+
+  /* Body: deep near-black with a purple undertone, not Tabler's #111827 */
+  --tblr-body-bg: #0a0a10;
+  --tblr-body-color: #e8e8ed;
+  --tblr-secondary-bg: #16161f;
+  --tblr-secondary-color: #9a9aab;
+
+  /* Cards: elevated dark, distinct from body */
+  --tblr-card-bg: #16161f;
+  --tblr-card-color: #e8e8ed;
+  --tblr-card-border-color: rgba(255, 255, 255, 0.06);
+  --tblr-border-color: rgba(255, 255, 255, 0.06);
+  --tblr-border-color-translucent: rgba(255, 255, 255, 0.04);
+
+  /* See the light block: .card reads --tblr-bg-surface, not --tblr-card-bg.
+     Without this, dark cards fall back to Tabler's --tblr-gray-800 (#1f2937). */
+  --tblr-bg-surface: #16161f;
+
+  /* Table in dark */
+  --tblr-table-bg: transparent;
+  --tblr-table-color: #e8e8ed;
+  --tblr-table-border-color: rgba(255, 255, 255, 0.05);
+}
+
+/* ===== DASHBOARD SIDEBAR -- distinct surface in both modes ===== */
+/* The vertical navbar takes its fill from --tblr-navbar-bg and its edge
+   from --tblr-navbar-border-color (via an inset box-shadow). Scoped to
+   the vertical variant so the marketing pages' horizontal navbar keeps
+   Tabler's own surface. */
+[data-bs-theme="light"] .navbar-vertical {
+  --tblr-navbar-bg: #f0eef8;
+  --tblr-navbar-border-color: rgba(108, 71, 255, 0.1);
+}
+[data-bs-theme="dark"] .navbar-vertical {
+  --tblr-navbar-bg: #08080c;
+  --tblr-navbar-border-color: rgba(255, 255, 255, 0.04);
+}
+
+/* ===== SUBTLE REFINEMENTS ===== */
+/* Slightly softer card radius than Tabler's default (6px -> 8px). */
+:root {
+  --tblr-border-radius: 8px;
+  --tblr-border-radius-lg: 12px;
+}
