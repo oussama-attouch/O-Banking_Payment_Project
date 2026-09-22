@@ -1,3 +1,657 @@
-﻿{% extends "partials/dashboard-base.html" %}
+{% extends "partials/dashboard-base.html" %}
+{% load static %}
+{% load humanize %}
+
 {% block title %}Dashboard &middot; O-Banking{% endblock %}
-{% block content %}<p>Dashboard (stub &mdash; replaced in 2a-dash-2)</p>{% endblock %}
+
+{% block content %}
+
+<!-- ============================ Row 1: KPI cards ======================= -->
+<div class="row row-deck row-cards">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="subheader">Balance</div>
+                    <div class="text-secondary"><i class="ti ti-wallet"></i></div>
+                </div>
+                <div class="h1 mb-1">{{ kpis.balance|intcomma }}</div>
+                <div class="text-secondary small">Point in time</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="subheader">Received (30d)</div>
+                    <div class="text-success"><i class="ti ti-arrow-down-left"></i></div>
+                </div>
+                <div class="h1 mb-1 text-success">{{ kpis.received|intcomma }}</div>
+                <div class="text-secondary small">Money in, completed</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="subheader">Sent (30d)</div>
+                    <div class="text-danger"><i class="ti ti-arrow-up-right"></i></div>
+                </div>
+                <div class="h1 mb-1 text-danger">{{ kpis.sent|intcomma }}</div>
+                <div class="text-secondary small">Money out, completed</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="subheader">Net flow (30d)</div>
+                    <div class="text-secondary"><i class="ti ti-chart-line"></i></div>
+                </div>
+                {% if kpis.net < 0 %}
+                <div class="h1 mb-1 text-danger">{{ kpis.net|intcomma }}</div>
+                {% else %}
+                <div class="h1 mb-1 text-success">{{ kpis.net|intcomma }}</div>
+                {% endif %}
+                <div class="text-secondary small">Received minus sent</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="subheader">Pending</div>
+                    <div class="text-warning"><i class="ti ti-clock"></i></div>
+                </div>
+                <div class="h1 mb-1">{{ kpis.pending_count }}</div>
+                <div class="text-secondary small">Awaiting confirmation or settlement</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="subheader">Transactions (30d)</div>
+                    <div class="text-secondary"><i class="ti ti-list-details"></i></div>
+                </div>
+                <div class="h1 mb-1">{{ kpis.transaction_count }}</div>
+                <div class="text-secondary small">All statuses, both directions</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="subheader">Average amount</div>
+                    <div class="text-secondary"><i class="ti ti-calculator"></i></div>
+                </div>
+                <div class="h1 mb-1">{{ kpis.average_amount|intcomma }}</div>
+                <div class="text-secondary small">Mean of completed movements</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="subheader">Largest</div>
+                    <div class="text-secondary"><i class="ti ti-trophy"></i></div>
+                </div>
+                <div class="h1 mb-1">{{ kpis.largest_amount|intcomma }}</div>
+                <div class="text-secondary small text-truncate">
+                    {% if kpis.largest_counterparty %}{{ kpis.largest_counterparty }}{% else %}&mdash;{% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================== Row 2: charts ======================== -->
+<div id="charts-empty" class="card mt-3 d-none">
+    <div class="card-body">
+        <div class="empty">
+            <div class="empty-icon text-secondary"><i class="ti ti-chart-line fs-1"></i></div>
+            <p class="empty-title">No activity to chart yet</p>
+            <p class="empty-subtitle text-secondary">
+                Send or request money and the charts will fill in. Nothing is plotted
+                until a movement has actually completed.
+            </p>
+        </div>
+    </div>
+</div>
+
+<div id="charts-grid" class="row row-deck row-cards mt-3">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Daily net flow</h3>
+                <div class="ms-auto btn-group" role="group" aria-label="Range">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-range="7">7D</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary active" data-range="30">30D</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-range="90">90D</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="chart-flow" style="height: 16rem;"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Status breakdown</h3>
+            </div>
+            <div class="card-body">
+                <canvas id="chart-status" style="height: 16rem;"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Weekly volume</h3>
+            </div>
+            <div class="card-body">
+                <canvas id="chart-weekly" style="height: 16rem;"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Balance trajectory</h3>
+                <div class="text-secondary small ms-auto">Last 90 days</div>
+            </div>
+            <div class="card-body">
+                <canvas id="chart-balance" style="height: 16rem;"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================== Row 3: tables ======================== -->
+<div class="row row-deck row-cards mt-3">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Recent transactions</h3>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Counterparty</th>
+                            <th class="text-end">Amount</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in recent_transactions %}
+                        <tr>
+                            <td class="text-secondary text-nowrap">
+                                <a href="{% url 'core:transaction-detail' t.transaction_id %}">{{ t.date|date:"d M, H:i" }}</a>
+                            </td>
+                            <td class="text-truncate">
+                                {% if t.sender_id == request.user.id %}
+                                {{ t.reciever.kyc.full_name|default:t.reciever.username }}
+                                {% else %}
+                                {{ t.sender.kyc.full_name|default:t.sender.username }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if t.status == "completed" or t.status == "request_settled" %}
+                                {% if t.transaction_type == "request" and t.sender_id == request.user.id or t.transaction_type == "transfer" and t.reciever_id == request.user.id %}
+                                <span class="text-success">+{{ t.amount|intcomma }}</span>
+                                {% else %}
+                                <span class="text-danger">&minus;{{ t.amount|intcomma }}</span>
+                                {% endif %}
+                                {% else %}
+                                <span class="text-secondary">{{ t.amount|intcomma }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge {% if t.status == 'completed' or t.status == 'request_settled' %}bg-success-lt{% elif t.status == 'failed' %}bg-danger-lt{% elif t.status == 'processing' %}bg-warning-lt{% elif t.status == 'request_sent' or t.status == 'request_processing' %}bg-info-lt{% else %}bg-secondary-lt{% endif %}">
+                                    {{ t.get_status_display|title }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="4" class="text-secondary text-center">No recent transactions</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Top counterparties</h3>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th class="text-end">Transactions</th>
+                            <th class="text-end">Volume</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in top_counterparties %}
+                        <tr>
+                            <td class="text-truncate">{{ row.name }}</td>
+                            <td class="text-end">{{ row.count }}</td>
+                            <td class="text-end">{{ row.volume|intcomma }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="3" class="text-secondary text-center">No counterparties yet</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ======================= Row 4: transaction history ================== -->
+<div class="card mt-3">
+    <div class="card-header">
+        <h3 class="card-title">Transaction history</h3>
+        <div class="text-secondary small ms-auto">
+            {{ transaction_history.total }} transaction{{ transaction_history.total|pluralize }}
+        </div>
+    </div>
+
+    <div class="card-body">
+        <form method="get" class="row g-2 align-items-center">
+            <div class="col-auto">
+                <select name="status" class="form-select" aria-label="Filter by status">
+                    <option value="">All statuses</option>
+                    {% for key, label in history_choices %}
+                    <option value="{{ key }}"{% if key == history_status %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <select name="type" class="form-select" aria-label="Filter by type">
+                    <option value="">All types</option>
+                    {% for key, label in history_type_choices %}
+                    <option value="{{ key }}"{% if key == history_type %} selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">Filter</button>
+            </div>
+        </form>
+    </div>
+
+    {% if transaction_history.total %}
+    <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Counterparty</th>
+                    <th class="text-end">Amount</th>
+                    <th>Status</th>
+                    <th class="text-end">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in transaction_history.items %}
+                <tr>
+                    <td class="text-secondary text-nowrap">{{ t.date|date:"d M Y, H:i" }}</td>
+                    <td class="text-secondary">{{ t.get_transaction_type_display }}</td>
+                    <td class="text-truncate">
+                        {% if t.sender_id == request.user.id %}
+                        {{ t.reciever.kyc.full_name|default:t.reciever.username }}
+                        {% else %}
+                        {{ t.sender.kyc.full_name|default:t.sender.username }}
+                        {% endif %}
+                    </td>
+                    <td class="text-end">
+                        {% if t.status == "completed" or t.status == "request_settled" %}
+                        {% if t.transaction_type == "request" and t.sender_id == request.user.id or t.transaction_type == "transfer" and t.reciever_id == request.user.id %}
+                        <span class="text-success">+{{ t.amount|intcomma }}</span>
+                        {% else %}
+                        <span class="text-danger">&minus;{{ t.amount|intcomma }}</span>
+                        {% endif %}
+                        {% else %}
+                        <span class="text-secondary">{{ t.amount|intcomma }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {% if t.status == 'completed' or t.status == 'request_settled' %}bg-success-lt{% elif t.status == 'failed' %}bg-danger-lt{% elif t.status == 'processing' %}bg-warning-lt{% elif t.status == 'request_sent' or t.status == 'request_processing' %}bg-info-lt{% else %}bg-secondary-lt{% endif %}">
+                            {{ t.get_status_display|title }}
+                        </span>
+                    </td>
+                    <td class="text-end">
+                        <a href="{% url 'core:transaction-detail' t.transaction_id %}" class="btn btn-sm btn-outline-secondary">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card-footer d-flex align-items-center justify-content-between">
+        <div class="text-secondary small">
+            Page {{ transaction_history.page }} of {{ transaction_history.total_pages }}
+        </div>
+        <ul class="pagination m-0">
+            <li class="page-item{% if not transaction_history.has_prev %} disabled{% endif %}">
+                <a class="page-link" href="?status={{ history_status }}&amp;type={{ history_type }}&amp;page={{ transaction_history.page|add:"-1" }}">Previous</a>
+            </li>
+            <li class="page-item{% if not transaction_history.has_next %} disabled{% endif %}">
+                <a class="page-link" href="?status={{ history_status }}&amp;type={{ history_type }}&amp;page={{ transaction_history.page|add:"1" }}">Next</a>
+            </li>
+        </ul>
+    </div>
+    {% else %}
+    <div class="card-body">
+        <div class="empty">
+            <div class="empty-icon text-secondary"><i class="ti ti-receipt fs-1"></i></div>
+            <p class="empty-title">No transactions match the current filter</p>
+            <p class="empty-subtitle text-secondary">
+                Clear the filters, or send or request money to start a history.
+            </p>
+            <div class="empty-action">
+                <a href="{% url 'account:dashboard' %}" class="btn btn-outline-secondary">Clear filters</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ==================== Row 5: quick actions + KYC ===================== -->
+<div class="row row-deck row-cards mt-3">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Quick actions</h3>
+            </div>
+            <div class="card-body d-flex flex-wrap gap-2">
+                <a href="{% url 'core:search-account' %}" class="btn btn-primary">
+                    <i class="ti ti-send me-1"></i> Send money
+                </a>
+                <a href="{% url 'core:request-search-account' %}" class="btn btn-outline-secondary">
+                    <i class="ti ti-download me-1"></i> Request payment
+                </a>
+                <a href="{% url 'core:transactions' %}" class="btn btn-outline-secondary">
+                    <i class="ti ti-list-details me-1"></i> View all transactions
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">KYC status</h3>
+                <span class="badge ms-auto {% if kyc_status.state == 'confirmed' %}bg-success{% elif kyc_status.state == 'pending' %}bg-warning{% else %}bg-secondary{% endif %}">
+                    {{ kyc_status.state|title }}
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="progress progress-sm mb-3">
+                    <div class="progress-bar" style="width: {{ kyc_status.progress }}%"
+                         role="progressbar" aria-valuenow="{{ kyc_status.progress }}"
+                         aria-valuemin="0" aria-valuemax="100" aria-label="KYC progress"></div>
+                </div>
+                <p class="text-secondary mb-0">
+                    {% if kyc_status.state == "confirmed" %}
+                    Your identity has been confirmed. Nothing further is needed.
+                    {% elif kyc_status.state == "pending" %}
+                    Your details are on file and are awaiting review. Banking is already unlocked.
+                    {% else %}
+                    No identity details are on file yet.
+                    {% endif %}
+                </p>
+                {% if kyc_status.state != "confirmed" %}
+                <a href="{% url 'account:kyc-reg' %}" class="btn btn-outline-secondary mt-3">
+                    {% if kyc_status.state == "pending" %}Review KYC{% else %}Complete KYC{% endif %}
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================== data for the charts ====================== -->
+{{ daily_flow_90d|json_script:"data-flow" }}
+{{ weekly_volume_12w|json_script:"data-weekly" }}
+{{ status_breakdown|json_script:"data-status" }}
+{{ history_choices|json_script:"data-status-labels" }}
+{{ kpis|json_script:"data-kpis" }}
+
+<script src="{% static 'tabler/js/chart.umd.min.js' %}"></script>
+<script>
+    (function () {
+        "use strict";
+
+        function readJSON(id) {
+            var el = document.getElementById(id);
+            return el ? JSON.parse(el.textContent) : null;
+        }
+
+        var flow = readJSON("data-flow");
+        var weekly = readJSON("data-weekly");
+        var statusCounts = readJSON("data-status");
+        var choicePairs = readJSON("data-status-labels") || [];
+        var kpis = readJSON("data-kpis") || {};
+
+        if (!flow || !weekly || !statusCounts || typeof Chart === "undefined") {
+            return;
+        }
+
+        function num(value) {
+            var n = Number(value);
+            return isFinite(n) ? n : 0;
+        }
+
+        // ---- empty state -------------------------------------------------
+        // Decided here rather than server-side: kpis.transaction_count is
+        // windowed to 30 days while the charts show 90 days / 12 weeks / all
+        // time, so the two can legitimately disagree.
+        var hasFlow = flow.some(function (d) { return num(d.received) || num(d.sent); });
+        var hasWeekly = weekly.some(function (d) { return num(d.received) || num(d.sent); });
+        var hasStatus = Object.keys(statusCounts).some(function (k) { return statusCounts[k] > 0; });
+
+        if (!hasFlow && !hasWeekly && !hasStatus) {
+            document.getElementById("charts-grid").classList.add("d-none");
+            document.getElementById("charts-empty").classList.remove("d-none");
+            return;
+        }
+
+        Chart.defaults.font.family = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+        Chart.defaults.color = "#6c7a91";
+
+        var GREEN = "#2fb344";
+        var RED = "#d63939";
+        var ACCENT = "#206bc4";
+        var PALETTE = ["#206bc4", "#2fb344", "#d63939", "#f76707", "#f59f00", "#ae3ec9", "#4299e1"];
+
+        function MONEY(value) {
+            return num(value).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+
+        // ---- 1. daily net flow, with a 7 / 30 / 90 range -----------------
+        var flowChart = new Chart(document.getElementById("chart-flow"), {
+            type: "line",
+            data: {
+                labels: [],
+                datasets: [
+                    { label: "Received", data: [], borderColor: GREEN, backgroundColor: GREEN, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                    { label: "Sent", data: [], borderColor: RED, backgroundColor: RED, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                    { label: "Net", data: [], borderColor: ACCENT, borderDash: [4, 4], tension: 0.3, pointRadius: 0, borderWidth: 1 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                plugins: {
+                    legend: { position: "bottom" },
+                    tooltip: {
+                        callbacks: {
+                            label: function (ctx) { return ctx.dataset.label + ": " + MONEY(ctx.parsed.y); }
+                        }
+                    }
+                },
+                scales: {
+                    x: { ticks: { display: true, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+
+        function renderFlow(days) {
+            var slice = flow.slice(-days);
+            flowChart.data.labels = slice.map(function (d) { return d.date; });
+            flowChart.data.datasets[0].data = slice.map(function (d) { return num(d.received); });
+            flowChart.data.datasets[1].data = slice.map(function (d) { return num(d.sent); });
+            flowChart.data.datasets[2].data = slice.map(function (d) { return num(d.net); });
+            // 90 date labels are too dense to read.
+            flowChart.options.scales.x.ticks.display = days < 90;
+            flowChart.update();
+        }
+        renderFlow(30);
+
+        var rangeButtons = document.querySelectorAll("[data-range]");
+        Array.prototype.forEach.call(rangeButtons, function (button) {
+            button.addEventListener("click", function () {
+                Array.prototype.forEach.call(rangeButtons, function (other) {
+                    other.classList.remove("active");
+                });
+                button.classList.add("active");
+                renderFlow(Number(button.getAttribute("data-range")));
+            });
+        });
+
+        // ---- 2. status breakdown ----------------------------------------
+        function prettyLabel(label) {
+            return String(label)
+                .replace(/_/g, " ")
+                .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+        }
+
+        var statusKeys = choicePairs.map(function (pair) { return pair[0]; });
+        var statusLabels = choicePairs.map(function (pair) { return prettyLabel(pair[1]); });
+
+        new Chart(document.getElementById("chart-status"), {
+            type: "doughnut",
+            data: {
+                labels: statusLabels,
+                datasets: [{
+                    data: statusKeys.map(function (key) { return statusCounts[key] || 0; }),
+                    backgroundColor: PALETTE,
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: "right" } },
+                cutout: "60%"
+            }
+        });
+
+        // ---- 3. weekly volume, grouped bars ------------------------------
+        new Chart(document.getElementById("chart-weekly"), {
+            type: "bar",
+            data: {
+                labels: weekly.map(function (d) { return d.week_start; }),
+                datasets: [
+                    { label: "Sent", data: weekly.map(function (d) { return num(d.sent); }), backgroundColor: RED },
+                    { label: "Received", data: weekly.map(function (d) { return num(d.received); }), backgroundColor: GREEN }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: "bottom" },
+                    tooltip: {
+                        callbacks: {
+                            label: function (ctx) { return ctx.dataset.label + ": " + MONEY(ctx.parsed.y); }
+                        }
+                    }
+                },
+                scales: { x: { stacked: false }, y: { beginAtZero: true } }
+            }
+        });
+
+        // ---- 4. balance trajectory --------------------------------------
+        // Walk the 90 day net flow forwards from (balance - sum of nets), so the
+        // final point is exactly kpis.balance.
+        var totalNet = flow.reduce(function (acc, d) { return acc + num(d.net); }, 0);
+        var running = num(kpis.balance) - totalNet;
+        var trajectory = flow.map(function (d) {
+            running += num(d.net);
+            return Number(running.toFixed(2));
+        });
+
+        new Chart(document.getElementById("chart-balance"), {
+            type: "line",
+            data: {
+                labels: flow.map(function (d) { return d.date; }),
+                datasets: [{
+                    label: "Balance",
+                    data: trajectory,
+                    borderColor: ACCENT,
+                    backgroundColor: "rgba(32, 107, 196, 0.15)",
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function (ctx) { return "Balance: " + MONEY(ctx.parsed.y); }
+                        }
+                    }
+                },
+                scales: {
+                    x: { ticks: { display: false } },
+                    y: { beginAtZero: false }
+                }
+            }
+        });
+    })();
+</script>
+
+{% endblock content %}
