@@ -5,6 +5,12 @@
 
 {% block content %}
 
+{# Date headings read Today / Yesterday / "Mon, Sep 22" / "Sep 22, 2026". #}
+{# Both dates below are rendered in the current timezone, the same one that #}
+{# the date filter localises to, so the ISO strings stay comparable. #}
+{% now "Y-m-d" as today_iso %}
+{% now "Y" as current_year %}
+
 <div class="card">
     <div class="card-header">
         <h2 class="card-title">Transactions</h2>
@@ -55,11 +61,26 @@
                             <th class="text-end">Action</th>
                         </tr>
                     </thead>
+                    {# Rows arrive in insertion order (the seeder back-dates after a bulk #}
+                    {# insert), so they are re-sorted by date here -- newest day first, the #}
+                    {# order the Today / Yesterday / older headings read in -- and each #}
+                    {# calendar day then becomes its own tbody with a full-width header. #}
+                    {% regroup sender_transaction|dictsortreversed:"date" by date|date:"Y-m-d" as sent_days %}
+                    {% for day in sent_days %}
                     <tbody>
-                        {% for s in sender_transaction %}
+                        <tr class="bg-surface-secondary">
+                            <td colspan="5" class="text-secondary small fw-medium">
+                                {% if day.grouper == today_iso %}Today{% elif day.list.0.date|naturalday == "yesterday" %}Yesterday{% elif day.list.0.date|date:"Y" == current_year %}{{ day.list.0.date|date:"D, M j" }}{% else %}{{ day.list.0.date|date:"M j, Y" }}{% endif %}
+                            </td>
+                        </tr>
+                        {% for s in day.list %}
                         <tr>
                             <td class="text-secondary text-nowrap">{{ s.date|date:"d M Y, H:i" }}</td>
                             <td class="text-truncate">
+                                {# Tint: orange while in flight, green when the money came in, blue when it left. #}
+                                <span class="avatar avatar-sm me-2 {% if s.status == 'pending' or s.status == 'processing' or s.status == 'request_sent' or s.status == 'request_processing' %}bg-orange-lt{% elif s.status == 'completed' or s.status == 'request_settled' %}{% if s.transaction_type == 'request' and s.sender_id == request.user.id or s.transaction_type == 'transfer' and s.reciever_id == request.user.id %}bg-green-lt{% else %}bg-blue-lt{% endif %}{% else %}bg-secondary-lt{% endif %}">
+                                    <i class="ti {% if s.transaction_type == 'transfer' %}{% if s.sender_id == request.user.id %}ti-arrow-right{% else %}ti-arrow-down-left{% endif %}{% elif s.transaction_type == 'recieved' %}ti-arrow-down-left{% elif s.transaction_type == 'request' %}ti-clock-question{% elif s.transaction_type == 'refund' %}ti-arrow-back-up{% elif s.transaction_type == 'withdraw' %}ti-cash{% else %}ti-circle-dashed{% endif %}"></i>
+                                </span>
                                 {% if s.sender_id == request.user.id %}
                                 {{ s.reciever.kyc.full_name|default:s.reciever.username }}
                                 {% else %}
@@ -79,7 +100,7 @@
                             </td>
                             <td>
                                 <span class="badge {% if s.status == 'completed' or s.status == 'request_settled' %}bg-success-lt{% elif s.status == 'failed' %}bg-danger-lt{% elif s.status == 'processing' or s.status == 'request_processing' %}bg-warning-lt{% elif s.status == 'request_sent' %}bg-info-lt{% elif s.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
-                                    {{ s.get_status_display|title }}
+                                    <i class="ti {% if s.status == 'completed' or s.status == 'request_settled' %}ti-check{% elif s.status == 'failed' %}ti-x{% elif s.status == 'processing' or s.status == 'request_sent' or s.status == 'request_processing' %}ti-clock{% elif s.status == 'pending' %}ti-hourglass{% else %}ti-clock{% endif %} me-1"></i>{{ s.get_status_display|title }}
                                 </span>
                             </td>
                             <td class="text-end">
@@ -89,21 +110,26 @@
                                 </a>
                             </td>
                         </tr>
-                        {% empty %}
+                        {% endfor %}
+                    </tbody>
+                    {% empty %}
+                    <tbody>
                         <tr>
                             <td colspan="5">
                                 <div class="empty">
-                                    <div class="empty-icon text-secondary"><i class="ti ti-receipt fs-1"></i></div>
+                                    <div class="empty-icon text-secondary"><i class="ti ti-send fs-1"></i></div>
                                     <p class="empty-title">No sent transactions yet</p>
-                                    <p class="empty-subtitle text-secondary">Payments you send will appear here.</p>
+                                    <p class="empty-subtitle text-secondary">Your outgoing transfers will appear here.</p>
                                     <div class="empty-action">
-                                        <a href="{% url 'core:search-account' %}" class="btn btn-primary">Send money</a>
+                                        <a href="{% url 'core:search-account' %}" class="btn btn-primary">
+                                            <i class="ti ti-send me-1"></i> Send money
+                                        </a>
                                     </div>
                                 </div>
                             </td>
                         </tr>
-                        {% endfor %}
                     </tbody>
+                    {% endfor %}
                 </table>
             </div>
         </div>
@@ -121,11 +147,21 @@
                             <th class="text-end">Action</th>
                         </tr>
                     </thead>
+                    {% regroup reciever_transaction|dictsortreversed:"date" by date|date:"Y-m-d" as received_days %}
+                    {% for day in received_days %}
                     <tbody>
-                        {% for s in reciever_transaction %}
+                        <tr class="bg-surface-secondary">
+                            <td colspan="5" class="text-secondary small fw-medium">
+                                {% if day.grouper == today_iso %}Today{% elif day.list.0.date|naturalday == "yesterday" %}Yesterday{% elif day.list.0.date|date:"Y" == current_year %}{{ day.list.0.date|date:"D, M j" }}{% else %}{{ day.list.0.date|date:"M j, Y" }}{% endif %}
+                            </td>
+                        </tr>
+                        {% for s in day.list %}
                         <tr>
                             <td class="text-secondary text-nowrap">{{ s.date|date:"d M Y, H:i" }}</td>
                             <td class="text-truncate">
+                                <span class="avatar avatar-sm me-2 {% if s.status == 'pending' or s.status == 'processing' or s.status == 'request_sent' or s.status == 'request_processing' %}bg-orange-lt{% elif s.status == 'completed' or s.status == 'request_settled' %}{% if s.transaction_type == 'request' and s.sender_id == request.user.id or s.transaction_type == 'transfer' and s.reciever_id == request.user.id %}bg-green-lt{% else %}bg-blue-lt{% endif %}{% else %}bg-secondary-lt{% endif %}">
+                                    <i class="ti {% if s.transaction_type == 'transfer' %}{% if s.sender_id == request.user.id %}ti-arrow-right{% else %}ti-arrow-down-left{% endif %}{% elif s.transaction_type == 'recieved' %}ti-arrow-down-left{% elif s.transaction_type == 'request' %}ti-clock-question{% elif s.transaction_type == 'refund' %}ti-arrow-back-up{% elif s.transaction_type == 'withdraw' %}ti-cash{% else %}ti-circle-dashed{% endif %}"></i>
+                                </span>
                                 {% if s.sender_id == request.user.id %}
                                 {{ s.reciever.kyc.full_name|default:s.reciever.username }}
                                 {% else %}
@@ -145,7 +181,7 @@
                             </td>
                             <td>
                                 <span class="badge {% if s.status == 'completed' or s.status == 'request_settled' %}bg-success-lt{% elif s.status == 'failed' %}bg-danger-lt{% elif s.status == 'processing' or s.status == 'request_processing' %}bg-warning-lt{% elif s.status == 'request_sent' %}bg-info-lt{% elif s.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
-                                    {{ s.get_status_display|title }}
+                                    <i class="ti {% if s.status == 'completed' or s.status == 'request_settled' %}ti-check{% elif s.status == 'failed' %}ti-x{% elif s.status == 'processing' or s.status == 'request_sent' or s.status == 'request_processing' %}ti-clock{% elif s.status == 'pending' %}ti-hourglass{% else %}ti-clock{% endif %} me-1"></i>{{ s.get_status_display|title }}
                                 </span>
                             </td>
                             <td class="text-end">
@@ -155,18 +191,26 @@
                                 </a>
                             </td>
                         </tr>
-                        {% empty %}
+                        {% endfor %}
+                    </tbody>
+                    {% empty %}
+                    <tbody>
                         <tr>
                             <td colspan="5">
                                 <div class="empty">
-                                    <div class="empty-icon text-secondary"><i class="ti ti-receipt fs-1"></i></div>
-                                    <p class="empty-title">No received transactions yet</p>
-                                    <p class="empty-subtitle text-secondary">Payments sent to you will appear here.</p>
+                                    <div class="empty-icon text-secondary"><i class="ti ti-inbox fs-1"></i></div>
+                                    <p class="empty-title">No received transactions</p>
+                                    <p class="empty-subtitle text-secondary">Incoming transfers will appear here.</p>
+                                    <div class="empty-action">
+                                        <a href="{% url 'core:request-search-account' %}" class="btn btn-primary">
+                                            <i class="ti ti-clock-question me-1"></i> Request payment
+                                        </a>
+                                    </div>
                                 </div>
                             </td>
                         </tr>
-                        {% endfor %}
                     </tbody>
+                    {% endfor %}
                 </table>
             </div>
         </div>
@@ -184,11 +228,21 @@
                             <th class="text-end">Action</th>
                         </tr>
                     </thead>
+                    {% regroup request_sender_transaction|dictsortreversed:"date" by date|date:"Y-m-d" as sent_request_days %}
+                    {% for day in sent_request_days %}
                     <tbody>
-                        {% for s in request_sender_transaction %}
+                        <tr class="bg-surface-secondary">
+                            <td colspan="5" class="text-secondary small fw-medium">
+                                {% if day.grouper == today_iso %}Today{% elif day.list.0.date|naturalday == "yesterday" %}Yesterday{% elif day.list.0.date|date:"Y" == current_year %}{{ day.list.0.date|date:"D, M j" }}{% else %}{{ day.list.0.date|date:"M j, Y" }}{% endif %}
+                            </td>
+                        </tr>
+                        {% for s in day.list %}
                         <tr>
                             <td class="text-secondary text-nowrap">{{ s.date|date:"d M Y, H:i" }}</td>
                             <td class="text-truncate">
+                                <span class="avatar avatar-sm me-2 {% if s.status == 'pending' or s.status == 'processing' or s.status == 'request_sent' or s.status == 'request_processing' %}bg-orange-lt{% elif s.status == 'completed' or s.status == 'request_settled' %}{% if s.transaction_type == 'request' and s.sender_id == request.user.id or s.transaction_type == 'transfer' and s.reciever_id == request.user.id %}bg-green-lt{% else %}bg-blue-lt{% endif %}{% else %}bg-secondary-lt{% endif %}">
+                                    <i class="ti {% if s.transaction_type == 'transfer' %}{% if s.sender_id == request.user.id %}ti-arrow-right{% else %}ti-arrow-down-left{% endif %}{% elif s.transaction_type == 'recieved' %}ti-arrow-down-left{% elif s.transaction_type == 'request' %}ti-clock-question{% elif s.transaction_type == 'refund' %}ti-arrow-back-up{% elif s.transaction_type == 'withdraw' %}ti-cash{% else %}ti-circle-dashed{% endif %}"></i>
+                                </span>
                                 {% if s.sender_id == request.user.id %}
                                 {{ s.reciever.kyc.full_name|default:s.reciever.username }}
                                 {% else %}
@@ -208,7 +262,7 @@
                             </td>
                             <td>
                                 <span class="badge {% if s.status == 'completed' or s.status == 'request_settled' %}bg-success-lt{% elif s.status == 'failed' %}bg-danger-lt{% elif s.status == 'processing' or s.status == 'request_processing' %}bg-warning-lt{% elif s.status == 'request_sent' %}bg-info-lt{% elif s.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
-                                    {{ s.get_status_display|title }}
+                                    <i class="ti {% if s.status == 'completed' or s.status == 'request_settled' %}ti-check{% elif s.status == 'failed' %}ti-x{% elif s.status == 'processing' or s.status == 'request_sent' or s.status == 'request_processing' %}ti-clock{% elif s.status == 'pending' %}ti-hourglass{% else %}ti-clock{% endif %} me-1"></i>{{ s.get_status_display|title }}
                                 </span>
                             </td>
                             <td class="text-end">
@@ -231,21 +285,26 @@
                                 {% endif %}
                             </td>
                         </tr>
-                        {% empty %}
+                        {% endfor %}
+                    </tbody>
+                    {% empty %}
+                    <tbody>
                         <tr>
                             <td colspan="5">
                                 <div class="empty">
-                                    <div class="empty-icon text-secondary"><i class="ti ti-inbox fs-1"></i></div>
+                                    <div class="empty-icon text-secondary"><i class="ti ti-clock-question fs-1"></i></div>
                                     <p class="empty-title">No sent requests yet</p>
-                                    <p class="empty-subtitle text-secondary">Requests you raise will appear here.</p>
+                                    <p class="empty-subtitle text-secondary">Payment requests you raise will appear here.</p>
                                     <div class="empty-action">
-                                        <a href="{% url 'core:request-search-account' %}" class="btn btn-primary">Request payment</a>
+                                        <a href="{% url 'core:request-search-account' %}" class="btn btn-primary">
+                                            <i class="ti ti-clock-question me-1"></i> Request payment
+                                        </a>
                                     </div>
                                 </div>
                             </td>
                         </tr>
-                        {% endfor %}
                     </tbody>
+                    {% endfor %}
                 </table>
             </div>
         </div>
@@ -263,11 +322,21 @@
                             <th class="text-end">Action</th>
                         </tr>
                     </thead>
+                    {% regroup request_reciever_transaction|dictsortreversed:"date" by date|date:"Y-m-d" as received_request_days %}
+                    {% for day in received_request_days %}
                     <tbody>
-                        {% for s in request_reciever_transaction %}
+                        <tr class="bg-surface-secondary">
+                            <td colspan="5" class="text-secondary small fw-medium">
+                                {% if day.grouper == today_iso %}Today{% elif day.list.0.date|naturalday == "yesterday" %}Yesterday{% elif day.list.0.date|date:"Y" == current_year %}{{ day.list.0.date|date:"D, M j" }}{% else %}{{ day.list.0.date|date:"M j, Y" }}{% endif %}
+                            </td>
+                        </tr>
+                        {% for s in day.list %}
                         <tr>
                             <td class="text-secondary text-nowrap">{{ s.date|date:"d M Y, H:i" }}</td>
                             <td class="text-truncate">
+                                <span class="avatar avatar-sm me-2 {% if s.status == 'pending' or s.status == 'processing' or s.status == 'request_sent' or s.status == 'request_processing' %}bg-orange-lt{% elif s.status == 'completed' or s.status == 'request_settled' %}{% if s.transaction_type == 'request' and s.sender_id == request.user.id or s.transaction_type == 'transfer' and s.reciever_id == request.user.id %}bg-green-lt{% else %}bg-blue-lt{% endif %}{% else %}bg-secondary-lt{% endif %}">
+                                    <i class="ti {% if s.transaction_type == 'transfer' %}{% if s.sender_id == request.user.id %}ti-arrow-right{% else %}ti-arrow-down-left{% endif %}{% elif s.transaction_type == 'recieved' %}ti-arrow-down-left{% elif s.transaction_type == 'request' %}ti-clock-question{% elif s.transaction_type == 'refund' %}ti-arrow-back-up{% elif s.transaction_type == 'withdraw' %}ti-cash{% else %}ti-circle-dashed{% endif %}"></i>
+                                </span>
                                 {% if s.sender_id == request.user.id %}
                                 {{ s.reciever.kyc.full_name|default:s.reciever.username }}
                                 {% else %}
@@ -287,7 +356,7 @@
                             </td>
                             <td>
                                 <span class="badge {% if s.status == 'completed' or s.status == 'request_settled' %}bg-success-lt{% elif s.status == 'failed' %}bg-danger-lt{% elif s.status == 'processing' or s.status == 'request_processing' %}bg-warning-lt{% elif s.status == 'request_sent' %}bg-info-lt{% elif s.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
-                                    {{ s.get_status_display|title }}
+                                    <i class="ti {% if s.status == 'completed' or s.status == 'request_settled' %}ti-check{% elif s.status == 'failed' %}ti-x{% elif s.status == 'processing' or s.status == 'request_sent' or s.status == 'request_processing' %}ti-clock{% elif s.status == 'pending' %}ti-hourglass{% else %}ti-clock{% endif %} me-1"></i>{{ s.get_status_display|title }}
                                 </span>
                             </td>
                             <td class="text-end">
@@ -307,18 +376,21 @@
                                 {% endif %}
                             </td>
                         </tr>
-                        {% empty %}
+                        {% endfor %}
+                    </tbody>
+                    {% empty %}
+                    <tbody>
                         <tr>
                             <td colspan="5">
                                 <div class="empty">
                                     <div class="empty-icon text-secondary"><i class="ti ti-inbox fs-1"></i></div>
                                     <p class="empty-title">No received requests yet</p>
-                                    <p class="empty-subtitle text-secondary">Requests made of you will appear here.</p>
+                                    <p class="empty-subtitle text-secondary">Payment requests made of you will appear here.</p>
                                 </div>
                             </td>
                         </tr>
-                        {% endfor %}
                     </tbody>
+                    {% endfor %}
                 </table>
             </div>
         </div>
