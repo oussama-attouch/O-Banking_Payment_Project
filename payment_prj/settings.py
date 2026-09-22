@@ -75,6 +75,8 @@ INSTALLED_APPS = [
     'core',
     'userauths',
     'account',
+    # Marketing content: the public blog and contact pages.
+    'pages',
 ]
 
 MIDDLEWARE = [

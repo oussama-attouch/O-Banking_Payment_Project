@@ -1,0 +1,32 @@
+{% extends "partials/base.html" %}
+{% comment %}
+TEMPORARY PLACEHOLDER — Phase 4a only.
+
+Phase 4b replaces this with the real contact template (hero, contact info, map,
+form, FAQ, CTA). The error list and value echo below exist so that the Phase 4a
+tests can prove a failed submission preserves what the visitor typed.
+{% endcomment %}
+{% block title %}Contact · O-Banking{% endblock %}
+
+{% block content %}
+<div class="container-xl py-5">
+    <h1 class="h3 mb-2">Contact</h1>
+    <p class="text-secondary">Placeholder template — replaced in Phase 4b.</p>
+
+    {% if errors %}
+    <ul>
+        {% for field, message in errors.items %}<li>{{ field }}: {{ message }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    <form method="post" action="{% url 'pages:contact' %}">
+        {% csrf_token %}
+        <p><input name="name" value="{{ form_data.name }}" placeholder="Name"></p>
+        <p><input name="email" value="{{ form_data.email }}" placeholder="Email"></p>
+        <p><input name="phone" value="{{ form_data.phone }}" placeholder="Phone"></p>
+        <p><input name="subject" value="{{ form_data.subject }}" placeholder="Subject"></p>
+        <p><textarea name="message" placeholder="Message">{{ form_data.message }}</textarea></p>
+        <button type="submit">Send</button>
+    </form>
+</div>
+{% endblock content %}

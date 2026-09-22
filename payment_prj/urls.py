@@ -8,6 +8,7 @@ from core import views
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("", include("core.urls")),
+    path("", include("pages.urls")),
     path("user/", include("userauths.urls")),
     path("account/", include("account.urls")),
 ]

@@ -1,0 +1,30 @@
+{% extends "partials/base.html" %}
+{% comment %}
+TEMPORARY PLACEHOLDER — Phase 4a only.
+
+Phase 4b replaces this with the real article template (breadcrumb, hero, body,
+tags row, sidebar with latest posts/categories/tags, related articles).
+{% endcomment %}
+{% block title %}{{ post.title }} · O-Banking{% endblock %}
+
+{% block content %}
+<div class="container-xl py-5">
+    <h1 class="h3 mb-2">{{ post.title }}</h1>
+    <p class="text-secondary">Placeholder template — replaced in Phase 4b.</p>
+
+    <p class="mb-1">Category: {{ post.category }} · By {{ post.author_name }} · {{ post.published_at|date:"d M Y" }}</p>
+    <p class="mb-1">Tags: {{ post.tags }}</p>
+
+    <div>{{ post.body }}</div>
+
+    <p class="mb-1 mt-3">Related: {{ related|length }}</p>
+    <ul>
+        {% for item in related %}<li>{{ item.title }}</li>{% endfor %}
+    </ul>
+
+    <p class="mb-1">Recent: {{ recent|length }}</p>
+    <ul>
+        {% for item in recent %}<li>{{ item.title }}</li>{% endfor %}
+    </ul>
+</div>
+{% endblock content %}

@@ -1,0 +1,33 @@
+{% extends "partials/base.html" %}
+{% comment %}
+TEMPORARY PLACEHOLDER — Phase 4a only.
+
+This file exists so the Phase 4a views and tests have something to render. It is
+not a design: Phase 4b replaces it with the real marketing template (hero,
+featured pair, category chips, 3-column grid, CTA). Nothing here should be
+carried forward.
+{% endcomment %}
+{% block title %}Blog · O-Banking{% endblock %}
+
+{% block content %}
+<div class="container-xl py-5">
+    <h1 class="h3 mb-2">Blog</h1>
+    <p class="text-secondary">Placeholder template — replaced in Phase 4b.</p>
+
+    <p class="mb-1">Featured: {{ featured|length }}</p>
+    <ul>
+        {% for post in featured %}<li>{{ post.title }}</li>{% endfor %}
+    </ul>
+
+    <p class="mb-1">Category: {{ active_category|default:"all" }}</p>
+    <p class="mb-1">Categories offered: {{ categories|length }}</p>
+
+    <ul>
+        {% for post in posts %}<li>{{ post.title }}</li>{% endfor %}
+    </ul>
+
+    <p class="text-secondary small">
+        Page {{ posts.number }} of {{ posts.paginator.num_pages }} — {{ posts.paginator.count }} article(s).
+    </p>
+</div>
+{% endblock content %}
