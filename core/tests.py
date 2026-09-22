@@ -612,8 +612,10 @@ class TransferDirectionGuardTests(MoneyMovementTestBase):
     Both ``TransferProcess`` and ``Settlement_processing`` took the credited
     account straight from the URL, so a party could POST the confirmation link
     with any account number and send the money somewhere the transaction row
-    does not record. These tests pin both the rejection and the happy path, so
-    the guard cannot be tightened into over-strictness unnoticed.
+    does not record. A URL naming an account that does not exist at all is the
+    same family of bug, and used to be a 500 rather than a rejection. These
+    tests pin both the rejection and the happy path, so the guard cannot be
+    tightened into over-strictness unnoticed.
     """
 
     MISMATCH_MESSAGE = "This transaction does not match the account in the link."
@@ -697,6 +699,65 @@ class TransferDirectionGuardTests(MoneyMovementTestBase):
             self.balances(), (Decimal("1100.00"), Decimal("400.00"))
         )
         self.assertEqual(self.balance(self.carol_acct), Decimal("250.00"))
+
+    # An account_number carrying a digit outside the generator's alphabet
+    # ("1234567890") can never be issued, so it is guaranteed not to exist.
+    MISSING_ACCOUNT = "2170000000000"
+
+    def test_settlement_with_unknown_account_number_does_not_500(self):
+        """Phase 1.9: .get() raised Account.DoesNotExist -> 500 before the guards.
+
+        The URL was resolved before the transaction checks, so an unknown
+        account_number crashed the view instead of rejecting it.
+        """
+        txn = self.create_request(amount="100.00", status="request_sent")
+        payer = self.payer_client()
+        self.assertFalse(
+            Account.objects.filter(account_number=self.MISSING_ACCOUNT).exists(),
+            "precondition: the account number must not exist",
+        )
+        url = reverse(
+            "core:settlement-processing", args=[self.MISSING_ACCOUNT, txn.transaction_id]
+        )
+
+        resp = payer.post(url, {"password": PASSWORD})
+        self.assertNotEqual(resp.status_code, 500, "an unknown account must not 500")
+        self.assertEqual(resp.status_code, 302)
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_sent", "the request must be untouched")
+        self.assertEqual(
+            (
+                self.balance(self.alice_acct),
+                self.balance(self.bob_acct),
+                self.balance(self.carol_acct),
+            ),
+            (Decimal("1000.00"), Decimal("500.00"), Decimal("250.00")),
+            "no money may move for an unknown account",
+        )
+
+    def test_transfer_with_unknown_account_number_does_not_500(self):
+        """The transfer side already used filter().first(); this pins it."""
+        txn = self.create_transfer(amount="100.00")
+        url = reverse(
+            "core:transfer-process", args=[self.MISSING_ACCOUNT, txn.transaction_id]
+        )
+
+        resp = self.client.post(url, {"password": PASSWORD})
+        self.assertNotEqual(resp.status_code, 500, "an unknown account must not 500")
+        self.assertEqual(resp.status_code, 302)
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "processing", "the transfer must be untouched")
+        self.assertEqual(
+            (
+                self.balance(self.alice_acct),
+                self.balance(self.bob_acct),
+                self.balance(self.carol_acct),
+            ),
+            (Decimal("1000.00"), Decimal("500.00"), Decimal("250.00")),
+            "no money may move for an unknown account",
+        )
 
 
 # =====================================================================

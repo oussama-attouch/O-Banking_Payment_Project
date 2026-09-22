@@ -153,8 +153,6 @@ def TransferProcess(request, account_number, transaction_id):
     sender_account = sender.account  
     receiver_account = account 
 
-    completed = False
-    
     if request.method == "POST":
         submitted_password = request.POST.get("password")
 

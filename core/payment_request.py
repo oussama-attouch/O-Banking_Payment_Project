@@ -170,7 +170,17 @@ def Settlement_processing(request,account_number,transaction_id):
     if transaction is None:
         messages.warning(request, "Transaction does not exist.")
         return redirect("core:transactions")
-    account = Account.objects.get(account_number=account_number)
+    # Phase 1.9: .get() raised Account.DoesNotExist -- a hard 500 -- when the
+    # URL named an account that does not exist. Use the same shape as
+    # TransferProcess (filter().first()), and the same message its sibling
+    # guard two lines above uses, so an unknown account and an unknown
+    # transaction are indistinguishable to the caller: a distinct "account
+    # does not exist" reply would turn this URL into an account-number oracle
+    # (see core/security.py on keeping existence and authorization merged).
+    account = Account.objects.filter(account_number=account_number).first()
+    if account is None:
+        messages.warning(request, "Transaction does not exist.")
+        return redirect("core:transactions")
 
     sender = request.user 
     sender_account = request.user.account 
