@@ -1,106 +1,81 @@
-{% extends 'partials/dashboard-base.html' %}
-{% load static %}
+{% extends "partials/dashboard-base.html" %}
 {% load humanize %}
-{% block content  %}
 
-    <!-- Dashboard Section start -->
-    <section class="dashboard-section body-collapse">
-        <div class="overlay pt-120">
-            <div class="container-fruid">
-                <div class="row">
-                    <div class="col-xl-11 col-lg-11">
-                        <div class="section-content">
+{% block title %}Transaction {{ transaction.transaction_id }} &middot; O-Banking{% endblock %}
 
-                            <div class="transactions-popup">
-                                <div class="container-fruid">
-                                    <div class="row">
-                                        <div class="col-lg-12">
-                                            <div>
-                                                <div class="modal-dialog modal-dialog-centered">
-                                                    <div class="modal-content">
-                                                        <div class="modal-header justify-content-between">
-                                                            <h5>Transaction Details</h5>
-                                                            <a href="{% url 'account:dashboard' %}"><i class="material-symbols-outlined">arrow_back</i></a>
-                                                        </div>
-                                                        <div class="main-content">
-                                                            <div class="row">
-                                                                <div class="col-sm-5 text-center">
-                                                                    <div class="icon-area">
-                                                                        <!-- <img style="width: 150px; height: 150px; border-radius: 50%; object-fit: cover;" src="{{transaction.reciever.kyc.image.url}}" alt="icon"> -->
-                                                                    </div>
-                                                                    <div class="text-area">
-                                                                        <!-- <h6>Sender: {{transaction.sender.kyc.full_name|title}}</h6>
-                                                                        <h6 class="mt-2">Reciever: {{transaction.reciever.kyc.full_name|title}}</h6> -->
-                                                                        <h5><b>{{transaction.amount|intcomma}} USD</b></h5>
-                                                                        <p>{{transaction.date}}</p>
-                                                                        <!-- <p class="text-warning com ">{{transaction.status|title}}</p> -->
-                                                                        {% if transaction.status == 'completed' %}
-                                                                            <p class="text-success">{{transaction.status|title}}</p>
-                                                                        {% endif %}
-                                                                        {% if transaction.status == 'pending' %}
-                                                                            <p class="text-warning">{{transaction.status|title}}</p>
-                                                                        {% endif %}
-                                                                        {% if transaction.status == 'failed' %}
-                                                                            <p class="danger">{{transaction.status|title}}</p>
-                                                                        {% endif %}
-                                                                        {% if transaction.status == 'processing' %}
-                                                                            <p class="text-warning">{{transaction.status|title}}</p>
-                                                                        {% endif %}
-                                                                    </div>
-                                                                </div>
-                                                                <div class="col-sm-7">
-                                                                    <div class="right-area">
-                                                                        <h6>Transaction Details</h6>
-                                                                        <ul class="payment-details">
-                                                                            <li>
-                                                                                <span>Payment Amount</span>
-                                                                                <span>{{transaction.amount|intcomma}} USD</span>
-                                                                            </li>
-                                                                            <li>
-                                                                                <span>Fee</span>
-                                                                                <span>Free USD</span>
-                                                                            </li>
-                                                                            <li>
-                                                                                <span>Total Amount</span>
-                                                                                <span>{{transaction.amount|intcomma}} USD</span>
-                                                                            </li>
-                                                                        </ul>
-                                                                        <ul class="payment-info">
-                                                                            <li>
-                                                                                <p>Payment From</p>
-                                                                                <span class="mdr">{{transaction.sender.kyc.full_name|title}}</span>
-                                                                            </li>
-                                                                            <li>
-                                                                                <p>Payment To</p>
-                                                                                <span class="mdr">{{transaction.reciever.kyc.full_name|title}}</span>
-                                                                            </li>
-                                                                            <li>
-                                                                                <p>Payment Description</p>
-                                                                                <span class="mdr">{{transaction.description}}</span>
-                                                                            </li>
-                                                                            <li>
-                                                                                <p>Transaction ID:</p>
-                                                                                <span class="mdr">{{transaction.transaction_id}}</span>
-                                                                            </li>
-                                                                        </ul>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8 col-xl-7">
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Transaction details</h2>
+                <span class="badge ms-auto {% if transaction.status == 'completed' or transaction.status == 'request_settled' %}bg-success-lt{% elif transaction.status == 'failed' %}bg-danger-lt{% elif transaction.status == 'processing' or transaction.status == 'request_processing' %}bg-warning-lt{% elif transaction.status == 'request_sent' %}bg-info-lt{% elif transaction.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
+                    {{ transaction.get_status_display|title }}
+                </span>
+            </div>
+
+            <div class="card-body text-center py-4">
+                {% if transaction.status == "completed" or transaction.status == "request_settled" %}
+                {% if transaction.transaction_type == "request" and transaction.sender_id == request.user.id or transaction.transaction_type == "transfer" and transaction.reciever_id == request.user.id %}
+                <div class="display-6 fw-bold text-success">+{{ transaction.amount|intcomma }}</div>
+                <div class="text-secondary small">Money in</div>
+                {% else %}
+                <div class="display-6 fw-bold text-danger">&minus;{{ transaction.amount|intcomma }}</div>
+                <div class="text-secondary small">Money out</div>
+                {% endif %}
+                {% else %}
+                <div class="display-6 fw-bold text-secondary">{{ transaction.amount|intcomma }}</div>
+                <div class="text-secondary small">No money has moved &mdash; this movement is not complete</div>
+                {% endif %}
+            </div>
+
+            <div class="card-body">
+                <div class="datagrid">
+                    <div>
+                        <div class="datagrid-title">Date</div>
+                        <div>{{ transaction.date|date:"d M Y, H:i" }}</div>
                     </div>
-                    
+                    <div>
+                        <div class="datagrid-title">Type</div>
+                        <div>{{ transaction.get_transaction_type_display }}</div>
+                    </div>
+                    <div>
+                        <div class="datagrid-title">From</div>
+                        <div>{{ transaction.sender.kyc.full_name|default:transaction.sender.username|default:"&mdash;" }}</div>
+                    </div>
+                    <div>
+                        <div class="datagrid-title">To</div>
+                        <div>{{ transaction.reciever.kyc.full_name|default:transaction.reciever.username|default:"&mdash;" }}</div>
+                    </div>
+                    <div>
+                        <div class="datagrid-title">Fee</div>
+                        <div>Free</div>
+                    </div>
+                    <div>
+                        <div class="datagrid-title">Reference</div>
+                        <div>{{ transaction.transaction_id }}</div>
+                    </div>
+                    <div>
+                        <div class="datagrid-title">Description</div>
+                        <div>{{ transaction.description|default:"&mdash;" }}</div>
+                    </div>
                 </div>
             </div>
-        </div>
-    </section>
-    <!-- Dashboard Section end -->
 
+            <div class="card-footer d-flex justify-content-between">
+                <a href="{% url 'core:transactions' %}" class="btn btn-outline-secondary">
+                    <i class="ti ti-arrow-left me-1"></i> Back to transactions
+                </a>
+                {% if transaction.reciever_id == request.user.id and transaction.status == "request_sent" %}
+                <a href="{% url 'core:settlement-confirmation' transaction.sender.account.account_number transaction.transaction_id %}"
+                   class="btn btn-primary">
+                    <i class="ti ti-check me-1"></i> Settle request
+                </a>
+                {% endif %}
+            </div>
+        </div>
+
+    </div>
+</div>
 {% endblock content %}

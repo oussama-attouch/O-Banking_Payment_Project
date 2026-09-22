@@ -1,300 +1,329 @@
 {% extends "partials/dashboard-base.html" %}
-{% load static %}
 {% load humanize %}
+
+{% block title %}Transactions &middot; O-Banking{% endblock %}
+
 {% block content %}
-    <!-- Dashboard Section start -->
-    <section class="dashboard-section body-collapse">
-        <div class="overlay pt-120">
-            <div class="container-fruid">
-                <div class="row">
-                    <div class="col-xl-12 col-lg-12">
-                        <div class="section-content">
-                            
-                            <div class="transactions-area">
-                                <div class="section-text">
-                                    <h5>Transactions</h5>
-                                </div>
-                                <div class="top-area d-flex align-items-center justify-content-between">
-                                    <ul class="nav nav-tabs" role="tablist">
-                                        <li class="nav-item" role="presentation">
-                                            <button class="nav-link active" id="latest-tab" data-bs-toggle="tab" data-bs-target="#latest" type="button" role="tab" aria-controls="latest" aria-selected="true">Sent</button>
-                                        </li>
-                                        <li class="nav-item" role="presentation">
-                                            <button class="nav-link" id="upcoming-tab" data-bs-toggle="tab" data-bs-target="#upcoming" type="button" role="tab" aria-controls="upcoming" aria-selected="false">Received</button>
-                                        </li>
-                                        <li class="nav-item" role="presentation">
-                                            <button class="nav-link" id="sender-request-tab" data-bs-toggle="tab" data-bs-target="#sender-request" type="button" role="tab" aria-controls="upcoming" aria-selected="false">Sent Requests</button>
-                                        </li>
-                                        <li class="nav-item" role="presentation">
-                                            <button class="nav-link" id="reciever-request-tab" data-bs-toggle="tab" data-bs-target="#reciever-request" type="button" role="tab" aria-controls="upcoming" aria-selected="false">Received Requests</button>
-                                        </li>
-                                    </ul>
-                                    <div class="view-all d-flex align-items-center">
-                                        <a href="javascript:void(0)">View All</a>
-                                        <img src="{% static 'assets1/images/icon/right-arrow.png' %}" alt="icon">
+
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">Transactions</h2>
+        <div class="text-secondary small ms-auto">Everything you have sent, received or requested</div>
+    </div>
+
+    <div class="card-header pt-0">
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="sent-tab" data-bs-toggle="tab" data-bs-target="#sent"
+                        type="button" role="tab" aria-controls="sent" aria-selected="true">
+                    Sent <span class="badge bg-blue-lt ms-1">{{ sender_transaction|length }}</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="received-tab" data-bs-toggle="tab" data-bs-target="#received"
+                        type="button" role="tab" aria-controls="received" aria-selected="false">
+                    Received <span class="badge bg-blue-lt ms-1">{{ reciever_transaction|length }}</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="sent-requests-tab" data-bs-toggle="tab" data-bs-target="#sent-requests"
+                        type="button" role="tab" aria-controls="sent-requests" aria-selected="false">
+                    Sent Requests <span class="badge bg-blue-lt ms-1">{{ request_sender_transaction|length }}</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="received-requests-tab" data-bs-toggle="tab" data-bs-target="#received-requests"
+                        type="button" role="tab" aria-controls="received-requests" aria-selected="false">
+                    Received Requests <span class="badge bg-blue-lt ms-1">{{ request_reciever_transaction|length }}</span>
+                </button>
+            </li>
+        </ul>
+    </div>
+
+    <div class="tab-content">
+
+        <!-- ============================ Sent ============================ -->
+        <div class="tab-pane fade show active" id="sent" role="tabpanel" aria-labelledby="sent-tab">
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Counterparty</th>
+                            <th class="text-end">Amount</th>
+                            <th>Status</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in sender_transaction %}
+                        <tr>
+                            <td class="text-secondary text-nowrap">{{ s.date|date:"d M Y, H:i" }}</td>
+                            <td class="text-truncate">
+                                {% if s.sender_id == request.user.id %}
+                                {{ s.reciever.kyc.full_name|default:s.reciever.username }}
+                                {% else %}
+                                {{ s.sender.kyc.full_name|default:s.sender.username }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if s.status == "completed" or s.status == "request_settled" %}
+                                {% if s.transaction_type == "request" and s.sender_id == request.user.id or s.transaction_type == "transfer" and s.reciever_id == request.user.id %}
+                                <span class="text-success">+{{ s.amount|intcomma }}</span>
+                                {% else %}
+                                <span class="text-danger">&minus;{{ s.amount|intcomma }}</span>
+                                {% endif %}
+                                {% else %}
+                                <span class="text-secondary">{{ s.amount|intcomma }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge {% if s.status == 'completed' or s.status == 'request_settled' %}bg-success-lt{% elif s.status == 'failed' %}bg-danger-lt{% elif s.status == 'processing' or s.status == 'request_processing' %}bg-warning-lt{% elif s.status == 'request_sent' %}bg-info-lt{% elif s.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
+                                    {{ s.get_status_display|title }}
+                                </span>
+                            </td>
+                            <td class="text-end">
+                                <a href="{% url 'core:transaction-detail' s.transaction_id %}"
+                                   class="btn btn-sm btn-outline-secondary">
+                                    <i class="ti ti-eye me-1"></i> View
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5">
+                                <div class="empty">
+                                    <div class="empty-icon text-secondary"><i class="ti ti-receipt fs-1"></i></div>
+                                    <p class="empty-title">No sent transactions yet</p>
+                                    <p class="empty-subtitle text-secondary">Payments you send will appear here.</p>
+                                    <div class="empty-action">
+                                        <a href="{% url 'core:search-account' %}" class="btn btn-primary">Send money</a>
                                     </div>
                                 </div>
-                                <div class="tab-content mt-40">
-                                    <div class="tab-pane fade show active" id="latest" role="tabpanel" aria-labelledby="latest-tab">
-                                        <div class="table-responsive">
-                                            <table class="table">
-                                                <thead>
-                                                    <tr>
-                                                        <th scope="col">Name/ Business</th>
-                                                        <th scope="col">Date</th>
-                                                        <th scope="col">Status</th>
-                                                        <th scope="col">Amount</th>
-                                                        <th scope="col">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    
-                                                    {% for s in sender_transaction %}
-                                                        <tr data-bs-toggle="modal" data-bs-target="#transactionsMod">
-                                                            <th scope="row">
-                                                                <p>{{s.reciever.kyc.full_name|title}}</p>
-                                                                <p class="mdr">{{s.transaction_type|title}}</p>
-                                                            </th>
-                                                            <td>
-                                                                <p><small>{{s.date|date:"h:i"}}</small></p>
-                                                                <p class="mdr">{{s.date|date:"d M, Y"}}</p>
-                                                            </td>
-                                                            <td>
-                                                                {% if s.status == 'completed' %}
-                                                                    <p class="text-success">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'pending' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'failed' %}
-                                                                    <p class="danger">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'processing' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                            </td>
-                                                            <td>
-                                                                <p>-${{s.amount|intcomma}}</p>
-                                                            </td>
-                                                            <td>
-                                                                <a href="{% url 'core:transaction-detail' s.transaction_id %}" class=""><i class="fas fa-eye"></i></a>
-
-                                                            </td>
-                                                        </tr>
-                                                    {% endfor %}
-                                                    
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                    <div class="tab-pane fade" id="upcoming" role="tabpanel" aria-labelledby="upcoming-tab">
-                                        <div class="table-responsive">
-                                            <table class="table">
-                                                <thead>
-                                                    <tr>
-                                                        <th scope="col">Name/ Business</th>
-                                                        <th scope="col">Date</th>
-                                                        <th scope="col">Status</th>
-                                                        <th scope="col">Amount</th>
-                                                        <th scope="col">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    
-                                                    {% for s in reciever_transaction %}
-                                                        <tr data-bs-toggle="modal" data-bs-target="#transactionsMod">
-                                                            <th scope="row">
-                                                                <p>{{s.sender.kyc.full_name|title}}</p>
-                                                                <p class="mdr">{{s.transaction_type|title}}</p>
-                                                            </th>
-                                                            <td>
-                                                                <p><small>{{s.date|date:"h:i"}}</small></p>
-                                                                <p class="mdr">{{s.date|date:"d M, Y"}}</p>
-                                                            </td>
-                                                            <td>
-                                                                {% if s.status == 'completed' %}
-                                                                    <p class="text-success">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'pending' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'failed' %}
-                                                                    <p class="danger">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'processing' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                            </td>
-                                                            <td>
-                                                                <p>+${{s.amount|intcomma}}</p>
-                                                            </td>
-                                                            <td>
-                                                                <a href="{% url 'core:transaction-detail' s.transaction_id %}" class=""><i class="fas fa-eye"></i></a>
-                                                            </td>
-                                                        </tr>
-                                                    {% endfor %}
-                                                    
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                    <div class="tab-pane fade" id="sender-request" role="tabpanel" aria-labelledby="sender-request-tab">
-                                        <div class="table-responsive">
-                                            <table class="table">
-                                                <thead>
-                                                    <tr>
-                                                        <th scope="col">Name/ Business</th>
-                                                        <th scope="col">Date</th>
-                                                        <th scope="col">Status</th>
-                                                        <th scope="col">Amount</th>
-                                                        <th scope="col">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    
-                                                    {% for s in request_sender_transaction %}
-                                                        <tr data-bs-toggle="modal" data-bs-target="#transactionsMod">
-                                                            <th scope="row">
-                                                                <p>{{s.reciever.kyc.full_name|title}}</p>
-                                                                <p class="mdr">{{s.transaction_type|title}}</p>
-                                                            </th>
-                                                            <td>
-                                                                <p><small>{{s.date|date:"h:i"}}</small></p>
-                                                                <p class="mdr">{{s.date|date:"d M, Y"}}</p>
-                                                            </td>
-                                                            <td>
-                                                                {% if s.status == 'completed' %}
-                                                                    <p class="text-success">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'pending' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'failed' %}
-                                                                    <p class="danger">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'processing' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'request_sent' %}
-                                                                    <p class="text-success">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'request_settled' %}
-                                                                    <p class="text-success">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'request_processing' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                            </td>
-                                                            <td>
-                                                                <p>+${{s.amount|intcomma}}</p>
-                                                            </td>
-                                                            <td>
-                                                                {% if s.status == "request_sent" %}
-                                                                <a href="{% url 'core:transaction-detail' s.transaction_id %}" class="btn btn-primary"><i class="fas fa-eye"></i> View</a>
-                                                                <form action="{% url 'core:delete-request' s.sender.account.account_number s.transaction_id %}" method="POST" class="d-inline">
-                                                                    {% csrf_token %}
-                                                                    <button type="submit" class="btn btn-danger"><i class="fas fa-x"></i> Delete</button>
-                                                                </form>
-                                                                {% endif %}
-
-                                                                {% if s.status == "request_processing" %}
-                                                                <a href="{% url 'core:transaction-detail' s.transaction_id %}" class="btn btn-primary"><i class="fas fa-eye"></i> View</a>
-                                                                <form action="{% url 'core:delete-request' s.sender.account.account_number s.transaction_id %}" method="POST" class="d-inline">
-                                                                    {% csrf_token %}
-                                                                    <button type="submit" class="btn btn-danger"><i class="fas fa-x"></i> Delete</button>
-                                                                </form>
-                                                                {% endif %}
-
-                                                                {% if s.status == "request_settled" %}
-                                                                <a class="btn btn-success"><i class="fas fa-check-circle"></i> Settled</a>
-                                                                {% endif %}
-
-                                                            </td>
-                                                        </tr>
-                                                    {% endfor %}
-                                                    
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                    <div class="tab-pane fade" id="reciever-request" role="tabpanel" aria-labelledby="reciever-request-tab">
-                                        <div class="table-responsive">
-                                            <table class="table">
-                                                <thead>
-                                                    <tr>
-                                                        <th scope="col">Name/ Business</th>
-                                                        <th scope="col">Date</th>
-                                                        <th scope="col">Status</th>
-                                                        <th scope="col">Amount</th>
-                                                        <th scope="col">Action</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    
-                                                    {% for s in request_reciever_transaction %}
-                                                        <tr data-bs-toggle="modal" data-bs-target="#transactionsMod">
-                                                            <th scope="row">
-                                                                <p>{{s.sender.kyc.full_name|title}}</p>
-                                                                <p class="mdr">{{s.transaction_type|title}}</p>
-                                                            </th>
-                                                            <td>
-                                                                <p><small>{{s.date|date:"h:i"}}</small></p>
-                                                                <p class="mdr">{{s.date|date:"d M, Y"}}</p>
-                                                            </td>
-                                                            <td>
-                                                                {% if s.status == 'completed' %}
-                                                                    <p class="text-success">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'pending' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'failed' %}
-                                                                    <p class="danger">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'processing' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'request_sent' %}
-                                                                <p class="text-success">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'request_settled' %}
-                                                                    <p class="text-success">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                                {% if s.status == 'request_processing' %}
-                                                                    <p class="inprogress">{{s.status|title}}</p>
-                                                                {% endif %}
-                                                            </td>
-                                                            <td>
-                                                                <p>+${{s.amount|intcomma}}</p>
-                                                            </td>
-                                                            <td>
-                                                                
-                                                                {% if s.status == "request_sent" %}
-                                                                    <a href="{% url 'core:settlement-confirmation' s.sender.account.account_number s.transaction_id %}" class="btn btn-primary"><i class="fas fa-check-circle"></i> Settle</a>
-                                                                    <a href="{% url 'core:transaction-detail' s.transaction_id %}" class=" btn btn-danger"> <i class="fas fa-x"></i> Cancel</a>
-                                                                {% endif %}
-
-                                                                {% if s.status == "request_settled" %}
-                                                                    <a href="" class="btn btn-success"><i class="fas fa-check-circle"></i> Settled</a>
-                                                                {% endif %}
-                                                                    
-                                                            </td>
-                                                        </tr>
-                                                    {% empty %}
-                                                    <li>No Received Requests</li>
-                                                    {% endfor %}
-                                                    
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
         </div>
-    </section>
-    {% endblock content %}
+
+        <!-- ========================== Received ========================== -->
+        <div class="tab-pane fade" id="received" role="tabpanel" aria-labelledby="received-tab">
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Counterparty</th>
+                            <th class="text-end">Amount</th>
+                            <th>Status</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in reciever_transaction %}
+                        <tr>
+                            <td class="text-secondary text-nowrap">{{ s.date|date:"d M Y, H:i" }}</td>
+                            <td class="text-truncate">
+                                {% if s.sender_id == request.user.id %}
+                                {{ s.reciever.kyc.full_name|default:s.reciever.username }}
+                                {% else %}
+                                {{ s.sender.kyc.full_name|default:s.sender.username }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if s.status == "completed" or s.status == "request_settled" %}
+                                {% if s.transaction_type == "request" and s.sender_id == request.user.id or s.transaction_type == "transfer" and s.reciever_id == request.user.id %}
+                                <span class="text-success">+{{ s.amount|intcomma }}</span>
+                                {% else %}
+                                <span class="text-danger">&minus;{{ s.amount|intcomma }}</span>
+                                {% endif %}
+                                {% else %}
+                                <span class="text-secondary">{{ s.amount|intcomma }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge {% if s.status == 'completed' or s.status == 'request_settled' %}bg-success-lt{% elif s.status == 'failed' %}bg-danger-lt{% elif s.status == 'processing' or s.status == 'request_processing' %}bg-warning-lt{% elif s.status == 'request_sent' %}bg-info-lt{% elif s.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
+                                    {{ s.get_status_display|title }}
+                                </span>
+                            </td>
+                            <td class="text-end">
+                                <a href="{% url 'core:transaction-detail' s.transaction_id %}"
+                                   class="btn btn-sm btn-outline-secondary">
+                                    <i class="ti ti-eye me-1"></i> View
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5">
+                                <div class="empty">
+                                    <div class="empty-icon text-secondary"><i class="ti ti-receipt fs-1"></i></div>
+                                    <p class="empty-title">No received transactions yet</p>
+                                    <p class="empty-subtitle text-secondary">Payments sent to you will appear here.</p>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ======================== Sent requests ======================= -->
+        <div class="tab-pane fade" id="sent-requests" role="tabpanel" aria-labelledby="sent-requests-tab">
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Counterparty</th>
+                            <th class="text-end">Amount</th>
+                            <th>Status</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in request_sender_transaction %}
+                        <tr>
+                            <td class="text-secondary text-nowrap">{{ s.date|date:"d M Y, H:i" }}</td>
+                            <td class="text-truncate">
+                                {% if s.sender_id == request.user.id %}
+                                {{ s.reciever.kyc.full_name|default:s.reciever.username }}
+                                {% else %}
+                                {{ s.sender.kyc.full_name|default:s.sender.username }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if s.status == "completed" or s.status == "request_settled" %}
+                                {% if s.transaction_type == "request" and s.sender_id == request.user.id or s.transaction_type == "transfer" and s.reciever_id == request.user.id %}
+                                <span class="text-success">+{{ s.amount|intcomma }}</span>
+                                {% else %}
+                                <span class="text-danger">&minus;{{ s.amount|intcomma }}</span>
+                                {% endif %}
+                                {% else %}
+                                <span class="text-secondary">{{ s.amount|intcomma }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge {% if s.status == 'completed' or s.status == 'request_settled' %}bg-success-lt{% elif s.status == 'failed' %}bg-danger-lt{% elif s.status == 'processing' or s.status == 'request_processing' %}bg-warning-lt{% elif s.status == 'request_sent' %}bg-info-lt{% elif s.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
+                                    {{ s.get_status_display|title }}
+                                </span>
+                            </td>
+                            <td class="text-end">
+                                <a href="{% url 'core:transaction-detail' s.transaction_id %}"
+                                   class="btn btn-sm btn-outline-secondary">
+                                    <i class="ti ti-eye me-1"></i> View
+                                </a>
+
+                                {% if s.status == "request_sent" or s.status == "request_processing" %}
+                                {# Phase 1 F4: deletion is a POST with CSRF, never a link. #}
+                                <form action="{% url 'core:delete-request' s.sender.account.account_number s.transaction_id %}"
+                                      method="POST" class="d-inline">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <i class="ti ti-trash me-1"></i> Delete
+                                    </button>
+                                </form>
+                                {% elif s.status == "request_settled" %}
+                                <span class="badge bg-success-lt"><i class="ti ti-check me-1"></i> Settled</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5">
+                                <div class="empty">
+                                    <div class="empty-icon text-secondary"><i class="ti ti-inbox fs-1"></i></div>
+                                    <p class="empty-title">No sent requests yet</p>
+                                    <p class="empty-subtitle text-secondary">Requests you raise will appear here.</p>
+                                    <div class="empty-action">
+                                        <a href="{% url 'core:request-search-account' %}" class="btn btn-primary">Request payment</a>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ====================== Received requests ===================== -->
+        <div class="tab-pane fade" id="received-requests" role="tabpanel" aria-labelledby="received-requests-tab">
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Counterparty</th>
+                            <th class="text-end">Amount</th>
+                            <th>Status</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in request_reciever_transaction %}
+                        <tr>
+                            <td class="text-secondary text-nowrap">{{ s.date|date:"d M Y, H:i" }}</td>
+                            <td class="text-truncate">
+                                {% if s.sender_id == request.user.id %}
+                                {{ s.reciever.kyc.full_name|default:s.reciever.username }}
+                                {% else %}
+                                {{ s.sender.kyc.full_name|default:s.sender.username }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if s.status == "completed" or s.status == "request_settled" %}
+                                {% if s.transaction_type == "request" and s.sender_id == request.user.id or s.transaction_type == "transfer" and s.reciever_id == request.user.id %}
+                                <span class="text-success">+{{ s.amount|intcomma }}</span>
+                                {% else %}
+                                <span class="text-danger">&minus;{{ s.amount|intcomma }}</span>
+                                {% endif %}
+                                {% else %}
+                                <span class="text-secondary">{{ s.amount|intcomma }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge {% if s.status == 'completed' or s.status == 'request_settled' %}bg-success-lt{% elif s.status == 'failed' %}bg-danger-lt{% elif s.status == 'processing' or s.status == 'request_processing' %}bg-warning-lt{% elif s.status == 'request_sent' %}bg-info-lt{% elif s.status == 'pending' %}bg-secondary-lt{% else %}bg-secondary-lt{% endif %}">
+                                    {{ s.get_status_display|title }}
+                                </span>
+                            </td>
+                            <td class="text-end">
+                                <a href="{% url 'core:transaction-detail' s.transaction_id %}"
+                                   class="btn btn-sm btn-outline-secondary">
+                                    <i class="ti ti-eye me-1"></i> View
+                                </a>
+
+                                {% if s.status == "request_sent" %}
+                                {# The only UI entry point into the settlement flow. #}
+                                <a href="{% url 'core:settlement-confirmation' s.sender.account.account_number s.transaction_id %}"
+                                   class="btn btn-sm btn-primary">
+                                    <i class="ti ti-check me-1"></i> Settle
+                                </a>
+                                {% elif s.status == "request_settled" %}
+                                <span class="badge bg-success-lt"><i class="ti ti-check me-1"></i> Settled</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5">
+                                <div class="empty">
+                                    <div class="empty-icon text-secondary"><i class="ti ti-inbox fs-1"></i></div>
+                                    <p class="empty-title">No received requests yet</p>
+                                    <p class="empty-subtitle text-secondary">Requests made of you will appear here.</p>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{% endblock content %}
