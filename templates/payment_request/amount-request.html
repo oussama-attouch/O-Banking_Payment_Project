@@ -1,75 +1,108 @@
 {% extends "partials/dashboard-base.html" %}
-{% load static %}
 {% load humanize %}
-{% block content %}
-    <!-- Dashboard Section start -->
-    <section class="dashboard-section body-collapse pay step step-2">
-        <div class="overlay pt-120">
-            <div class="container-fruid">
-                <div class="main-content">
-                    <div class="head-area d-flex align-items-center justify-content-between">
-                        <h4>Request Payment</h4>
-                        <div class="icon-area">
-                            <img src="{% static 'assets1/images/icon/support-icon.png' %}" alt="icon">
-                        </div>
-                    </div>
-                    <div class="choose-recipient">
-                        <div class="step-area">
-                            <span class="mdr">Step 2 of 3</span>
-                            <h5>Set Amount of request</h5>
-                        </div>
-                        <div class="user-select">
-                            <div class="single-user">
-                                <div class="left d-flex align-items-center">
-                                    <div class="img-area">
-                                        <!-- <img src="{{ a.user.kyc.image.url }}" alt="image"> -->
-                                        <img src="{{ account.user.kyc.image.url }}" style="width: 100px; height: 100px; border-radius: 50%; object-fit: cover;"  alt="image">
-    
-                                    </div>
-                                    <div class="text-area">
-                                        <p>{{ account.user.kyc.full_name|title }}</p>
-                                        <span class="mdr"><b>{{ account.account_number }}</b></span> <br>
-                                        <span class="mdr">{{ account.user.email }}</span>
-                                    </div>
-                                </div>
-                                <div class="right">
-                                    
-                                    <a href="{% url 'core:amount-transfer' account.account_number %}">
-                                        <i class="icon-h-edit"></i>
-                                        Edit
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <form action="{% url 'core:amount-request-process' account.account_number %}" method="POST">
-                        {% csrf_token %}
-                        <div class="send-banance">
-                            <span class="mdr">You Request</span>
-                            <div class="input-area">
-                                <input class="xxlr" placeholder="Enter Amount request" type="number" name="amount-request" id="amount-request">
-                            </div>
-                           
-                        </div>
-                        <!-- Js -->
 
-                        <div class="send-banance pt-0 mt-0">
-                            <span class="mdr">Request Payment Description</span>
-                            <div class="input-area">
-                                <input class="xxlr" placeholder="Request Money from house rent" type="text" name="description">
-                                
-                            </div>
-                        </div>
-                        
-                        <div class="footer-area mt-40">
-                            <a href="{% url 'core:request-search-account' %}">Previous Step</a>
-                            <button type="submit" id="amount-transfer" style="padding: 10px 30px; border-radius: 10px; background: rgb(98, 0, 255); color: #fff;" class="active">Next</button>
-                        </div>
-                    </form>
+{% block title %}Request an amount &middot; O-Banking{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8 col-xl-7">
+
+        <!-- Who will be asked to pay -->
+        <div class="card mb-3">
+            <div class="card-body d-flex align-items-center">
+                {% if account.user.kyc.image %}
+                <span class="avatar avatar-lg me-3"
+                      style="background-image: url('{{ account.user.kyc.image.url }}')"></span>
+                {% else %}
+                <span class="avatar avatar-lg me-3">{{ account.user.kyc.full_name|default:account.user.email|first|upper }}</span>
+                {% endif %}
+
+                <div class="flex-fill">
+                    <div class="fw-bold">{{ account.user.kyc.full_name|title|default:account.user.email }}</div>
+                    <div class="text-secondary small">Account No {{ account.account_number }}</div>
+                    <div class="text-secondary small text-truncate">{{ account.user.email }}</div>
                 </div>
+
+                {# "Change" means change the person being asked, so it returns to the request search. #}
+                <a href="{% url 'core:request-search-account' %}" class="btn btn-outline-secondary btn-sm">
+                    <i class="ti ti-edit me-1"></i> Change
+                </a>
             </div>
         </div>
-    </section>
-    <!-- Dashboard Section end -->
 
-    {% endblock content %}
+        <form action="{% url 'core:amount-request-process' account.account_number %}" method="POST">
+            {% csrf_token %}
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Set the amount</h2>
+                    <div class="text-secondary">Step 2 of 3</div>
+                </div>
+
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="amount-request">You request</label>
+                        <input type="number" class="form-control" id="amount-request" name="amount-request"
+                               min="0.01" step="0.01" inputmode="decimal" required
+                               placeholder="Enter amount request">
+                        <small class="form-hint">
+                            The request is only a request &mdash; no money moves until the other
+                            person settles it.
+                        </small>
+                    </div>
+
+                    <div class="mb-0">
+                        <label class="form-label" for="description">Request description</label>
+                        <input type="text" class="form-control" id="description" name="description"
+                               placeholder="Request money from house rent">
+                        <small class="form-hint">Optional. Appears on both sides of the request.</small>
+                    </div>
+                </div>
+
+                <div class="card-footer">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span class="text-secondary">Total requested</span>
+                        <span class="fw-bold" id="total-to-pay">0.00</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'core:request-search-account' %}" class="btn btn-outline-secondary">Previous Step</a>
+                        <button type="submit" id="amount-request-submit" class="btn btn-primary" disabled>Next</button>
+                    </div>
+                </div>
+            </div>
+        </form>
+
+    </div>
+</div>
+
+<script>
+    /* Live total + submit gating for the request form.
+       The request has no conversion and no fees: the total is the amount.
+       Deliberately references only elements that exist on this page. */
+    (function () {
+        var amount = document.getElementById("amount-request");
+        var total = document.getElementById("total-to-pay");
+        var submit = document.getElementById("amount-request-submit");
+        if (!amount || !total || !submit) { return; }
+
+        function format(value) {
+            return value.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+
+        function update() {
+            var raw = amount.value.trim();
+            var value = Number(raw);
+            var valid = raw !== "" && isFinite(value) && value > 0;
+
+            total.textContent = valid ? format(value) : "0.00";
+            submit.disabled = !valid;
+        }
+
+        amount.addEventListener("input", update);
+        update();
+    })();
+</script>
+{% endblock content %}
