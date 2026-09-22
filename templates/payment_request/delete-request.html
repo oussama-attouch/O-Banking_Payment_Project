@@ -1,31 +1,56 @@
 {% extends "partials/dashboard-base.html" %}
-{% load static %}
 {% load humanize %}
+
+{% block title %}Request not deleted &middot; O-Banking{% endblock %}
+
 {% block content %}
-    <!-- Dashboard Section start -->
-    <section class="dashboard-section body-collapse">
-        <div class="overlay pt-120">
-            <div class="container-fruid">
-                <div class="main-content">
-                    <div class="head-area d-flex align-items-center justify-content-between">
-                        <h4>Payment Request</h4>
-                        <div class="icon-area">
-                            <!-- <img src="{% static 'assets1/images/icon/support-icon.png' %}" alt="icon"> -->
-                        </div>
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <div class="text-warning mb-3">
+                    <i class="ti ti-alert-triangle display-4"></i>
+                </div>
+                <h1 class="h2 mb-2">Request not deleted</h1>
+                <p class="text-secondary mb-0">
+                    Only the account that created a payment request can delete it.
+                    Nothing was deleted.
+                </p>
+            </div>
+
+            <div class="card-body">
+                <div class="datagrid">
+                    <div>
+                        <div class="datagrid-title">Amount requested</div>
+                        <div>{{ transaction.amount|intcomma }}</div>
                     </div>
-                    <div class="request-submitted pb-120 text-center">
-                        <div class="top-area">
-                            <div class="icon-area">
-                                <img src="{% static 'assets/images/icon/not-confirm.png' %}" alt="icon">
-                            </div>
-                            <h3>Not Permitted</h3>
-                            <p>Payment request <b>{{transaction.transaction_id}}</b> does not belong to this account, so it cannot be deleted here.</p>
-                            <h5><a href="{% url 'core:transactions' %}"><b>Back to transactions</b></a></h5>
-                        </div>
+                    <div>
+                        <div class="datagrid-title">Requested by</div>
+                        <div>{{ account.user.kyc.full_name|title|default:account.user.email }}</div>
                     </div>
+                    <div>
+                        <div class="datagrid-title">Reference</div>
+                        <div>{{ transaction.transaction_id }}</div>
+                    </div>
+                    <div>
+                        <div class="datagrid-title">Status</div>
+                        <div>{{ transaction.get_status_display }}</div>
+                    </div>
+                    {% if transaction.description %}
+                    <div>
+                        <div class="datagrid-title">Description</div>
+                        <div>{{ transaction.description }}</div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
+
+            <div class="card-footer d-flex justify-content-center">
+                <a href="{% url 'core:transactions' %}" class="btn btn-primary">Back to transactions</a>
+            </div>
         </div>
-    </section>
-    <!-- Dashboard Section end -->
+
+    </div>
+</div>
 {% endblock content %}

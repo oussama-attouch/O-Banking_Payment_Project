@@ -1,33 +1,57 @@
 {% extends "partials/dashboard-base.html" %}
-{% load static %}
 {% load humanize %}
+
+{% block title %}Settlement complete &middot; O-Banking{% endblock %}
+
 {% block content %}
-    <!-- Dashboard Section start -->
-    <section class="dashboard-section body-collapse pay step step-2 step-3 receive-3">
-        <div class="overlay pt-120">
-            <div class="container-fruid">
-                <div class="main-content">
-                    <div class="head-area d-flex align-items-center justify-content-between">
-                        <h4>Request a Payment</h4>
-                        <div class="icon-area">
-                            <!-- <img src="{% static 'assets1/images/icon/support-icon.png' %}" alt="icon"> -->
-                        </div>
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <div class="text-success mb-3">
+                    <i class="ti ti-circle-check display-4"></i>
+                </div>
+                <h1 class="h2 mb-2">Settlement complete</h1>
+                <p class="text-secondary mb-0">
+                    The money has moved. You paid the payment request raised by
+                    {{ account.user.kyc.full_name|title|default:account.user.email }}.
+                </p>
+            </div>
+
+            <div class="card-body">
+                <div class="datagrid">
+                    <div>
+                        <div class="datagrid-title">Amount paid</div>
+                        <div>{{ transaction.amount|intcomma }}</div>
                     </div>
-                    <div class="request-submitted pb-120 text-center">
-                        <div class="top-area">
-                            <div class="icon-area">
-                                <img src="{% static 'assets1/images/icon/submitted-icon.png' %}" alt="icon">
-                            </div>
-                            <h3>Submitted</h3>
-                            <p>Payment request <b>{{transaction.transaction_id}}</b> was sent to <b>{{account.user.kyc.full_name}}</b></p>
-                            <h5><a href=""><b>View Details</b></a> | <a href=""><b>Send another payment</b></a></h5>
-                        </div>
-                     
+                    <div>
+                        <div class="datagrid-title">To</div>
+                        <div>{{ account.user.kyc.full_name|title|default:account.user.email }}</div>
                     </div>
+                    <div>
+                        <div class="datagrid-title">Account No</div>
+                        <div>{{ account.account_number }}</div>
+                    </div>
+                    <div>
+                        <div class="datagrid-title">Reference</div>
+                        <div>{{ transaction.transaction_id }}</div>
+                    </div>
+                    {% if transaction.description %}
+                    <div>
+                        <div class="datagrid-title">Description</div>
+                        <div>{{ transaction.description }}</div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
-        </div>
-    </section>
-    <!-- Dashboard Section end -->
 
-    {% endblock content %}
+            <div class="card-footer d-flex justify-content-center gap-2">
+                <a href="{% url 'core:transactions' %}" class="btn btn-primary">Back to transactions</a>
+                <a href="{% url 'core:request-search-account' %}" class="btn btn-outline-secondary">Pay another request</a>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock content %}
