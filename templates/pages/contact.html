@@ -1,32 +1,219 @@
 {% extends "partials/base.html" %}
 {% comment %}
-TEMPORARY PLACEHOLDER — Phase 4a only.
+Contact page. Hero, an honest "about this project" card beside the form, a
+six-question FAQ in two columns, then the shared CTA.
 
-Phase 4b replaces this with the real contact template (hero, contact info, map,
-form, FAQ, CTA). The error list and value echo below exist so that the Phase 4a
-tests can prove a failed submission preserves what the visitor typed.
+There is deliberately no map and no street address: the project has no office,
+and inventing one would be the kind of fake detail the rest of the site avoids.
+
+Field values come from `form_data` (supplied by pages.views on both GET and
+POST), so a rejected submission keeps what the visitor typed. Errors are keyed
+by field name: `errors.name`, `errors.email`, and so on.
 {% endcomment %}
 {% block title %}Contact · O-Banking{% endblock %}
 
 {% block content %}
+
+{% include "partials/marketing-hero.html" with hero_title="We'd love to hear from you" hero_subtitle="Questions, feedback, or ideas. Send us a note." %}
+
 <div class="container-xl py-5">
-    <h1 class="h3 mb-2">Contact</h1>
-    <p class="text-secondary">Placeholder template — replaced in Phase 4b.</p>
+    <div class="row">
+        {# ------------------------------------------------------ about card #}
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="card-title">About this project</h2>
+                    <p class="text-secondary">
+                        This is an academic Django project. There is no support team, no office,
+                        and no real banking service.
+                    </p>
 
-    {% if errors %}
-    <ul>
-        {% for field, message in errors.items %}<li>{{ field }}: {{ message }}</li>{% endfor %}
-    </ul>
-    {% endif %}
+                    <ul class="list-unstyled mb-0">
+                        <li class="d-flex mb-3">
+                            <span class="me-2 text-primary"><i class="ti ti-info-circle fs-2"></i></span>
+                            <span class="text-secondary small">
+                                Built as a final-year coursework project. Nothing here is connected
+                                to a payment network.
+                            </span>
+                        </li>
+                        <li class="d-flex mb-3">
+                            <span class="me-2 text-primary"><i class="ti ti-mail fs-2"></i></span>
+                            <span class="text-secondary small">
+                                Messages sent through this form are stored in the project's local
+                                SQLite database and shown in its admin. They are not emailed
+                                anywhere &mdash; no mail server is configured.
+                            </span>
+                        </li>
+                        <li class="d-flex">
+                            <span class="me-2 text-primary"><i class="ti ti-map-pin fs-2"></i></span>
+                            <span class="text-secondary small">
+                                No office address, and no public repository URL yet. The source
+                                runs locally and is available on request.
+                            </span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
 
-    <form method="post" action="{% url 'pages:contact' %}">
-        {% csrf_token %}
-        <p><input name="name" value="{{ form_data.name }}" placeholder="Name"></p>
-        <p><input name="email" value="{{ form_data.email }}" placeholder="Email"></p>
-        <p><input name="phone" value="{{ form_data.phone }}" placeholder="Phone"></p>
-        <p><input name="subject" value="{{ form_data.subject }}" placeholder="Subject"></p>
-        <p><textarea name="message" placeholder="Message">{{ form_data.message }}</textarea></p>
-        <button type="submit">Send</button>
-    </form>
+        {# ------------------------------------------------------------ form #}
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="card-title">Send a message</h2>
+
+                    <form method="post" action="{% url 'pages:contact' %}" novalidate>
+                        {% csrf_token %}
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="id_name">Name</label>
+                                <input type="text" name="name" id="id_name" class="form-control"
+                                       value="{{ form_data.name }}" maxlength="100" required>
+                                {% if errors.name %}<div class="text-danger small mt-1">{{ errors.name }}</div>{% endif %}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="id_email">Email</label>
+                                <input type="email" name="email" id="id_email" class="form-control"
+                                       value="{{ form_data.email }}" maxlength="254" required>
+                                {% if errors.email %}<div class="text-danger small mt-1">{{ errors.email }}</div>{% endif %}
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="id_phone">Phone <span class="text-secondary">(optional)</span></label>
+                                <input type="text" name="phone" id="id_phone" class="form-control"
+                                       value="{{ form_data.phone }}" maxlength="30">
+                                {% if errors.phone %}<div class="text-danger small mt-1">{{ errors.phone }}</div>{% endif %}
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="id_subject">Subject</label>
+                                <input type="text" name="subject" id="id_subject" class="form-control"
+                                       value="{{ form_data.subject }}" maxlength="150" required>
+                                {% if errors.subject %}<div class="text-danger small mt-1">{{ errors.subject }}</div>{% endif %}
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label" for="id_message">Message</label>
+                            <textarea name="message" id="id_message" class="form-control" rows="6"
+                                      maxlength="5000" required>{{ form_data.message }}</textarea>
+                            {% if errors.message %}<div class="text-danger small mt-1">{{ errors.message }}</div>{% endif %}
+                        </div>
+
+                        <div class="d-flex align-items-center">
+                            <button type="submit" class="btn btn-primary">Send message</button>
+                            <span class="text-secondary small ms-3">No real support team reads this &mdash; it is a demo.</span>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+{# -------------------------------------------------------------------- FAQ #}
+<div class="container-xl pb-5">
+    <h2 class="mb-4">Frequently asked questions</h2>
+    <div class="row">
+        <div class="col-lg-6">
+            <div class="accordion" id="faq-left">
+                <div class="accordion-item">
+                    <h3 class="accordion-header" id="faq-left-1-head">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#faq-left-1" aria-expanded="false" aria-controls="faq-left-1">
+                            Is this a real bank?
+                        </button>
+                    </h3>
+                    <div id="faq-left-1" class="accordion-collapse collapse" aria-labelledby="faq-left-1-head" data-bs-parent="#faq-left">
+                        <div class="accordion-body">
+                            No. It is a final-year Django project. No money moves, no payment network is
+                            involved, and every account in it is simulated.
+                        </div>
+                    </div>
+                </div>
+                <div class="accordion-item">
+                    <h3 class="accordion-header" id="faq-left-2-head">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#faq-left-2" aria-expanded="false" aria-controls="faq-left-2">
+                            Can I register?
+                        </button>
+                    </h3>
+                    <div id="faq-left-2" class="accordion-collapse collapse" aria-labelledby="faq-left-2-head" data-bs-parent="#faq-left">
+                        <div class="accordion-body">
+                            Yes. Accounts are free and no real data is required. Use an address you do not
+                            mind losing &mdash; the database is local to whoever runs the project.
+                        </div>
+                    </div>
+                </div>
+                <div class="accordion-item">
+                    <h3 class="accordion-header" id="faq-left-3-head">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#faq-left-3" aria-expanded="false" aria-controls="faq-left-3">
+                            Is my data stored?
+                        </button>
+                    </h3>
+                    <div id="faq-left-3" class="accordion-collapse collapse" aria-labelledby="faq-left-3-head" data-bs-parent="#faq-left">
+                        <div class="accordion-body">
+                            The KYC fields are stored in a local SQLite file. Do not upload real identity
+                            documents: the files land in a gitignored <code>media/</code> directory on the
+                            machine running the project.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="accordion" id="faq-right">
+                <div class="accordion-item">
+                    <h3 class="accordion-header" id="faq-right-1-head">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#faq-right-1" aria-expanded="false" aria-controls="faq-right-1">
+                            How do transfers work?
+                        </button>
+                    </h3>
+                    <div id="faq-right-1" class="accordion-collapse collapse" aria-labelledby="faq-right-1-head" data-bs-parent="#faq-right">
+                        <div class="accordion-body">
+                            They are simulated against a local SQLite database. A transfer is created in a
+                            processing state, then confirmed by re-entering your password, and only then are
+                            the two balances updated inside one database transaction.
+                        </div>
+                    </div>
+                </div>
+                <div class="accordion-item">
+                    <h3 class="accordion-header" id="faq-right-2-head">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#faq-right-2" aria-expanded="false" aria-controls="faq-right-2">
+                            What stack is this?
+                        </button>
+                    </h3>
+                    <div id="faq-right-2" class="accordion-collapse collapse" aria-labelledby="faq-right-2-head" data-bs-parent="#faq-right">
+                        <div class="accordion-body">
+                            Django 5.2 LTS on Python 3.12, SQLite for storage, and Tabler for the
+                            interface. No frontend framework and no build step.
+                        </div>
+                    </div>
+                </div>
+                <div class="accordion-item">
+                    <h3 class="accordion-header" id="faq-right-3-head">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#faq-right-3" aria-expanded="false" aria-controls="faq-right-3">
+                            Is the source available?
+                        </button>
+                    </h3>
+                    <div id="faq-right-3" class="accordion-collapse collapse" aria-labelledby="faq-right-3-head" data-bs-parent="#faq-right">
+                        <div class="accordion-body">
+                            Yes, on request. There is no public repository URL yet.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include "partials/marketing-cta.html" %}
+
 {% endblock content %}

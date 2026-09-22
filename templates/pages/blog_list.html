@@ -1,33 +1,123 @@
 {% extends "partials/base.html" %}
 {% comment %}
-TEMPORARY PLACEHOLDER — Phase 4a only.
+Blog index. Featured pair, category chips, a 3-column grid and pagination.
 
-This file exists so the Phase 4a views and tests have something to render. It is
-not a design: Phase 4b replaces it with the real marketing template (hero,
-featured pair, category chips, 3-column grid, CTA). Nothing here should be
-carried forward.
+`post.gradient_classes` is set on each instance by pages.views (a plain Python
+attribute, not a model field): BlogPost.cover_gradient stores a *name* from
+GRADIENT_CHOICES, and views.GRADIENT_CLASSES maps that name to the two Tabler
+utilities that render it. The |default: keeps the strip visible if a post ever
+reaches the template without going through the view.
 {% endcomment %}
 {% block title %}Blog · O-Banking{% endblock %}
 
 {% block content %}
+
+{% include "partials/marketing-hero.html" with hero_title="Stay Updated On Digital Payments" hero_subtitle="Insights, trends, and notes from the O-Banking project." %}
+
+{# ---------------------------------------------------------------- featured #}
 <div class="container-xl py-5">
-    <h1 class="h3 mb-2">Blog</h1>
-    <p class="text-secondary">Placeholder template — replaced in Phase 4b.</p>
-
-    <p class="mb-1">Featured: {{ featured|length }}</p>
-    <ul>
-        {% for post in featured %}<li>{{ post.title }}</li>{% endfor %}
-    </ul>
-
-    <p class="mb-1">Category: {{ active_category|default:"all" }}</p>
-    <p class="mb-1">Categories offered: {{ categories|length }}</p>
-
-    <ul>
-        {% for post in posts %}<li>{{ post.title }}</li>{% endfor %}
-    </ul>
-
-    <p class="text-secondary small">
-        Page {{ posts.number }} of {{ posts.paginator.num_pages }} — {{ posts.paginator.count }} article(s).
-    </p>
+    <div class="row row-cards">
+        {% for post in featured %}
+        <div class="col-md-6">
+            <div class="card card-link-pop h-100">
+                {# 3px gradient strip along the top edge; .card is position:relative. #}
+                <div class="card-status-top bg-gradient {{ post.gradient_classes|default:"bg-gradient-from-primary bg-gradient-to-purple" }}"></div>
+                <div class="card-body">
+                    <div class="d-flex align-items-center mb-3">
+                        <span class="badge bg-purple-lt">{{ post.get_category_display }}</span>
+                        <span class="text-secondary ms-auto">{{ post.published_at|date:"M j, Y" }}</span>
+                    </div>
+                    <h2 class="card-title">
+                        <a href="{% url 'pages:blog_detail' post.slug %}" class="stretched-link">{{ post.title }}</a>
+                    </h2>
+                    <p class="text-secondary">{{ post.excerpt }}</p>
+                    <div class="text-secondary small">By {{ post.author_name }}</div>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-12"><p class="text-secondary mb-0">No featured articles yet.</p></div>
+        {% endfor %}
+    </div>
 </div>
+
+{# --------------------------------------------------------- category chips #}
+<div class="container-xl pb-4">
+    <div class="btn-group flex-wrap" role="group" aria-label="Filter articles by category">
+        <a href="{% url 'pages:blog_list' %}"
+           class="btn {% if not active_category %}btn-primary{% else %}btn-outline-primary{% endif %}">All Articles</a>
+        {% for key, label in categories %}
+        <a href="?category={{ key }}"
+           class="btn {% if active_category == key %}btn-primary{% else %}btn-outline-primary{% endif %}">{{ label }}</a>
+        {% endfor %}
+    </div>
+</div>
+
+{# ------------------------------------------------------------ article grid #}
+<div class="container-xl pb-5">
+    <div class="row row-cards">
+        {% for post in posts %}
+        <div class="col-md-6 col-lg-4">
+            <div class="card card-link-pop h-100">
+                <div class="card-status-top bg-gradient {{ post.gradient_classes|default:"bg-gradient-from-primary bg-gradient-to-purple" }}"></div>
+                <div class="card-body">
+                    <div class="d-flex align-items-center mb-3">
+                        <span class="badge bg-purple-lt">{{ post.get_category_display }}</span>
+                        <span class="text-secondary ms-auto small">{{ post.published_at|date:"M j, Y" }}</span>
+                    </div>
+                    <h3 class="card-title mb-2">
+                        <a href="{% url 'pages:blog_detail' post.slug %}" class="stretched-link">{{ post.title }}</a>
+                    </h3>
+                    <p class="text-secondary small mb-0">{{ post.excerpt|truncatechars:120 }}</p>
+                </div>
+                <div class="card-footer">
+                    <div class="text-secondary small d-flex align-items-center">
+                        <i class="ti ti-user me-1"></i>{{ post.author_name }}
+                        <span class="ms-auto"><i class="ti ti-clock me-1"></i>{{ post.published_at|date:"M j" }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-12">
+            <div class="text-center text-secondary py-5">
+                <i class="ti ti-article-off fs-1 d-block mb-3"></i>
+                <p class="mb-3">No articles in this category yet.</p>
+                <a href="{% url 'pages:blog_list' %}" class="btn btn-outline-primary">Show all articles</a>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    {% if posts.paginator.num_pages > 1 %}
+    <div class="d-flex align-items-center mt-4">
+        <ul class="pagination m-0">
+            <li class="page-item {% if not posts.has_previous %}disabled{% endif %}">
+                {% if posts.has_previous %}
+                <a class="page-link" href="?{% if active_category %}category={{ active_category }}&amp;{% endif %}page={{ posts.previous_page_number }}">
+                    <i class="ti ti-arrow-left me-1"></i>Previous
+                </a>
+                {% else %}
+                <span class="page-link"><i class="ti ti-arrow-left me-1"></i>Previous</span>
+                {% endif %}
+            </li>
+            <li class="page-item {% if not posts.has_next %}disabled{% endif %}">
+                {% if posts.has_next %}
+                <a class="page-link" href="?{% if active_category %}category={{ active_category }}&amp;{% endif %}page={{ posts.next_page_number }}">
+                    Next<i class="ti ti-arrow-right ms-1"></i>
+                </a>
+                {% else %}
+                <span class="page-link">Next<i class="ti ti-arrow-right ms-1"></i></span>
+                {% endif %}
+            </li>
+        </ul>
+        <span class="text-secondary small ms-auto">
+            Page {{ posts.number }} of {{ posts.paginator.num_pages }} &mdash; {{ posts.paginator.count }} article{{ posts.paginator.count|pluralize }}
+        </span>
+    </div>
+    {% endif %}
+</div>
+
+{% include "partials/marketing-cta.html" %}
+
 {% endblock content %}

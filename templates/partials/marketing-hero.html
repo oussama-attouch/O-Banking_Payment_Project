@@ -1,0 +1,27 @@
+{% comment %}
+Parameterised marketing hero.
+
+Usage:
+    {% include "partials/marketing-hero.html" with hero_title="..." hero_subtitle="..." hero_cta_url=some_url hero_cta_label="..." %}
+
+hero_subtitle, hero_cta_url and hero_cta_label are all optional; the CTA button
+only renders when both its url and label are supplied.
+
+The inline `padding: 5rem 0` is deliberate and is the only inline style here.
+Tabler's spacing scale stops at `.py-6` (2rem) -- there is no `.py-7` or `.py-8`
+in tabler.min.css -- and a hero needs more vertical room than 2rem. Everything
+else is a stock Tabler utility.
+{% endcomment %}
+<section class="bg-gradient bg-gradient-from-primary bg-gradient-to-purple text-white" style="padding: 5rem 0;">
+    <div class="container-xl text-center">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <h1 class="display-4 fw-bold text-white mb-3">{{ hero_title }}</h1>
+                {% if hero_subtitle %}<p class="lead text-white-50 mb-4">{{ hero_subtitle }}</p>{% endif %}
+                {% if hero_cta_url and hero_cta_label %}
+                <a href="{{ hero_cta_url }}" class="btn btn-lg btn-light">{{ hero_cta_label }}</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</section>

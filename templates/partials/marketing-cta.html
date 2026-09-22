@@ -1,0 +1,20 @@
+{% comment %}
+Fixed-content call to action, included at the bottom of every marketing page.
+
+No parameters. The inline `padding: 4rem 0` is the only inline style, for the
+same reason as the hero: Tabler has no spacing step above `.py-6` (2rem). This
+section sits inside a container with rounded corners rather than full-bleed, so
+the padding cannot come from a wrapper utility without an extra element.
+{% endcomment %}
+<section class="bg-gradient bg-gradient-from-primary bg-gradient-to-purple text-white mt-6" style="padding: 4rem 0; border-radius: var(--tblr-border-radius-lg);">
+    <div class="container-xl text-center">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <span class="badge bg-white text-primary mb-3">Academic Project</span>
+                <h2 class="display-5 fw-bold text-white mb-3">Ready to explore O-Banking?</h2>
+                <p class="lead text-white-50 mb-4">A Django 5.2 banking demo. Register a free account and walk the money path end to end.</p>
+                <a href="{% url 'userauths:sign-up' %}" class="btn btn-lg btn-light">Open a Free Account</a>
+            </div>
+        </div>
+    </div>
+</section>

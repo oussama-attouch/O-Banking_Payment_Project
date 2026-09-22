@@ -60,6 +60,40 @@ class BlogTests(TestCase):
         self.assertNotIn("Draft Post", titles)
         self.assertNotContains(response, "Draft Post")
 
+    def test_blog_list_featured_respects_category_filter(self):
+        """The featured row is filtered by ?category=, and the grid is not."""
+        fintech_featured = make_post(
+            slug="fintech-featured", title="Fintech Featured",
+            category="fintech", is_featured=True,
+        )
+        make_post(
+            slug="security-featured", title="Security Featured",
+            category="security", is_featured=True,
+        )
+        fintech_plain = make_post(
+            slug="fintech-plain", title="Fintech Plain", category="fintech",
+        )
+
+        response = self.client.get(reverse("pages:blog_list"), {"category": "fintech"})
+        self.assertEqual(response.status_code, 200)
+
+        featured_titles = [p.title for p in response.context["featured"]]
+        self.assertEqual(featured_titles, ["Fintech Featured"])
+        self.assertNotIn("Security Featured", featured_titles)
+
+        # With a category active the grid is the complete list for that
+        # category, so the featured post stays in it rather than vanishing.
+        grid_titles = sorted(p.title for p in response.context["posts"])
+        self.assertEqual(grid_titles, ["Fintech Featured", "Fintech Plain"])
+        self.assertIn(fintech_featured.pk, [p.pk for p in response.context["posts"]])
+        self.assertIn(fintech_plain.pk, [p.pk for p in response.context["posts"]])
+
+        # Unfiltered, the featured pair is still removed from the grid.
+        unfiltered = self.client.get(reverse("pages:blog_list"))
+        self.assertEqual(
+            sorted(p.title for p in unfiltered.context["posts"]), ["Fintech Plain"]
+        )
+
     def test_blog_detail_renders_200(self):
         post = make_post(slug="detail-me", title="Detail Me")
         response = self.client.get(reverse("pages:blog_detail", args=[post.slug]))
@@ -124,3 +158,19 @@ class ContactTests(TestCase):
         self.assertEqual(ContactMessage.objects.count(), 0)
         self.assertIn("email", response.context["errors"])
         self.assertEqual(response.context["form_data"]["email"], "not-an-email")
+
+    def test_contact_post_rejects_overlong_name(self):
+        """A name past the model's max_length is refused, not stored truncated.
+
+        SQLite does not enforce varchar lengths, so this is the only thing
+        standing between an over-long value and the database.
+        """
+        submitted = dict(self.VALID, name="A" * 200)
+        response = self.client.post(reverse("pages:contact"), submitted)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ContactMessage.objects.count(), 0)
+        self.assertIn("name", response.context["errors"])
+        self.assertIn("too long", response.context["errors"]["name"])
+        # The over-long value comes back so the visitor can shorten it.
+        self.assertEqual(response.context["form_data"]["name"], "A" * 200)
+        self.assertContains(response, "too long")

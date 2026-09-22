@@ -64,6 +64,8 @@
             display: block;
         }
     </style>
+
+    {% block head_extra %}{% endblock %}
 </head>
 
 <body class="d-flex flex-column min-vh-100">
@@ -74,6 +76,13 @@
                 <img src="{% static 'tabler/img/logo.svg' %}" width="180" height="32"
                      alt="O-Banking" class="navbar-brand-image">
             </a>
+
+            {# Public site navigation. Hidden below md so the header stays on one line. #}
+            <ul class="navbar-nav d-none d-md-flex">
+                <li class="nav-item"><a class="nav-link" href="{% url 'core:index' %}">Home</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'pages:blog_list' %}">Blog</a></li>
+                <li class="nav-item"><a class="nav-link" href="{% url 'pages:contact' %}">Contact</a></li>
+            </ul>
 
             <div class="navbar-nav flex-row order-md-last align-items-center">
                 {% if request.user.is_authenticated %}
@@ -117,18 +126,57 @@
 
     <footer class="footer footer-transparent d-print-none mt-auto">
         <div class="container-xl">
-            <div class="row text-center">
-                <div class="col-12 text-secondary">
-                    O-Banking &mdash; academic project, 2026
+            <div class="row gy-4">
+                <div class="col-lg-4">
+                    <a class="navbar-brand d-flex align-items-center mb-2" href="{% url 'core:index' %}">
+                        <img src="{% static 'tabler/img/logo.svg' %}" width="140" height="25"
+                             alt="O-Banking" class="navbar-brand-image">
+                    </a>
+                    <p class="text-secondary small mb-0">
+                        A Django banking demo. Academic project, 2026.
+                    </p>
                 </div>
-                <div class="col-12 text-secondary small mt-1">
-                    Final-year coursework. Not a real bank, and no real money moves.
+
+                <div class="col-6 col-lg-2">
+                    <h3 class="h3 mb-2">Explore</h3>
+                    <ul class="list-unstyled">
+                        <li><a class="link-secondary" href="{% url 'core:index' %}">Home</a></li>
+                        <li><a class="link-secondary" href="{% url 'pages:blog_list' %}">Blog</a></li>
+                        <li><a class="link-secondary" href="{% url 'pages:contact' %}">Contact</a></li>
+                    </ul>
+                </div>
+
+                <div class="col-6 col-lg-2">
+                    <h3 class="h3 mb-2">Account</h3>
+                    <ul class="list-unstyled">
+                        <li><a class="link-secondary" href="{% url 'userauths:sign-in' %}">Sign In</a></li>
+                        <li><a class="link-secondary" href="{% url 'userauths:sign-up' %}">Sign Up</a></li>
+                        {% if request.user.is_authenticated %}
+                        <li><a class="link-secondary" href="{% url 'account:dashboard' %}">Dashboard</a></li>
+                        {% endif %}
+                    </ul>
+                </div>
+
+                <div class="col-lg-4">
+                    <h3 class="h3 mb-2">About this project</h3>
+                    <p class="text-secondary small mb-0">
+                        A final-year Django project. No real money moves. Source available on request.
+                    </p>
+                </div>
+            </div>
+
+            <div class="row border-top pt-3 mt-4">
+                <div class="col-12 d-flex align-items-center">
+                    <span class="text-secondary small">&copy; 2026 O-Banking &mdash; Academic project</span>
+                    <span class="badge bg-secondary-lt ms-auto">Not a real bank</span>
                 </div>
             </div>
         </div>
     </footer>
 
     <script src="{% static 'tabler/js/tabler.min.js' %}" defer></script>
+
+    {% block scripts %}{% endblock %}
 </body>
 
 </html>
