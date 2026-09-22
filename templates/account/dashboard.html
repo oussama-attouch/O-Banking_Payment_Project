@@ -12,11 +12,33 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="subheader">Balance</div>
-                    <div class="text-secondary"><i class="ti ti-wallet"></i></div>
+                    <div class="text-secondary small">Balance</div>
+                    <i class="ti ti-wallet text-secondary"></i>
                 </div>
-                <div class="h1 mb-1">{{ kpis.balance|intcomma }}</div>
-                <div class="text-secondary small">Point in time</div>
+                <div class="d-flex align-items-end justify-content-between">
+                    <div>
+                        <div class="h1 mb-0">{{ kpis.balance|intcomma }}</div>
+{% with delta=kpi_deltas.balance %}
+{% if delta.delta_pct is not None %}
+                        <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
+                            {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
+                            {{ delta.delta_pct }}%
+                        </span>
+{% else %}
+                        <span class="text-secondary small">no comparison</span>
+{% endif %}
+{% endwith %}
+                    </div>
+{% with delta=kpi_deltas.balance %}
+                    {% if delta.sparkline_points %}
+                    <svg class="kpi-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
+                                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    {% endif %}
+{% endwith %}
+                </div>
+                <div class="text-secondary small mt-1">Point in time</div>
             </div>
         </div>
     </div>
@@ -25,11 +47,33 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="subheader">Received (30d)</div>
-                    <div class="text-success"><i class="ti ti-arrow-down-left"></i></div>
+                    <div class="text-secondary small">Received (30d)</div>
+                    <i class="ti ti-arrow-down-left text-secondary"></i>
                 </div>
-                <div class="h1 mb-1 text-success">{{ kpis.received|intcomma }}</div>
-                <div class="text-secondary small">Money in, completed</div>
+                <div class="d-flex align-items-end justify-content-between">
+                    <div>
+                        <div class="h1 mb-0 text-success">{{ kpis.received|intcomma }}</div>
+{% with delta=kpi_deltas.received %}
+{% if delta.delta_pct is not None %}
+                        <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
+                            {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
+                            {{ delta.delta_pct }}%
+                        </span>
+{% else %}
+                        <span class="text-secondary small">no comparison</span>
+{% endif %}
+{% endwith %}
+                    </div>
+{% with delta=kpi_deltas.received %}
+                    {% if delta.sparkline_points %}
+                    <svg class="kpi-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
+                                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    {% endif %}
+{% endwith %}
+                </div>
+                <div class="text-secondary small mt-1">Money in, completed</div>
             </div>
         </div>
     </div>
@@ -38,11 +82,33 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="subheader">Sent (30d)</div>
-                    <div class="text-danger"><i class="ti ti-arrow-up-right"></i></div>
+                    <div class="text-secondary small">Sent (30d)</div>
+                    <i class="ti ti-arrow-up-right text-secondary"></i>
                 </div>
-                <div class="h1 mb-1 text-danger">{{ kpis.sent|intcomma }}</div>
-                <div class="text-secondary small">Money out, completed</div>
+                <div class="d-flex align-items-end justify-content-between">
+                    <div>
+                        <div class="h1 mb-0 text-danger">{{ kpis.sent|intcomma }}</div>
+{% with delta=kpi_deltas.sent %}
+{% if delta.delta_pct is not None %}
+                        <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
+                            {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
+                            {{ delta.delta_pct }}%
+                        </span>
+{% else %}
+                        <span class="text-secondary small">no comparison</span>
+{% endif %}
+{% endwith %}
+                    </div>
+{% with delta=kpi_deltas.sent %}
+                    {% if delta.sparkline_points %}
+                    <svg class="kpi-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
+                                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    {% endif %}
+{% endwith %}
+                </div>
+                <div class="text-secondary small mt-1">Money out, completed</div>
             </div>
         </div>
     </div>
@@ -51,15 +117,33 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="subheader">Net flow (30d)</div>
-                    <div class="text-secondary"><i class="ti ti-chart-line"></i></div>
+                    <div class="text-secondary small">Net flow (30d)</div>
+                    <i class="ti ti-chart-line text-secondary"></i>
                 </div>
-                {% if kpis.net < 0 %}
-                <div class="h1 mb-1 text-danger">{{ kpis.net|intcomma }}</div>
-                {% else %}
-                <div class="h1 mb-1 text-success">{{ kpis.net|intcomma }}</div>
-                {% endif %}
-                <div class="text-secondary small">Received minus sent</div>
+                <div class="d-flex align-items-end justify-content-between">
+                    <div>
+                        <div class="h1 mb-0">{{ kpis.net|intcomma }}</div>
+{% with delta=kpi_deltas.net %}
+{% if delta.delta_pct is not None %}
+                        <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
+                            {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
+                            {{ delta.delta_pct }}%
+                        </span>
+{% else %}
+                        <span class="text-secondary small">no comparison</span>
+{% endif %}
+{% endwith %}
+                    </div>
+{% with delta=kpi_deltas.net %}
+                    {% if delta.sparkline_points %}
+                    <svg class="kpi-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
+                                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    {% endif %}
+{% endwith %}
+                </div>
+                <div class="text-secondary small mt-1">Received minus sent</div>
             </div>
         </div>
     </div>
@@ -68,11 +152,33 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="subheader">Pending</div>
-                    <div class="text-warning"><i class="ti ti-clock"></i></div>
+                    <div class="text-secondary small">Pending</div>
+                    <i class="ti ti-clock text-secondary"></i>
                 </div>
-                <div class="h1 mb-1">{{ kpis.pending_count }}</div>
-                <div class="text-secondary small">Awaiting confirmation or settlement</div>
+                <div class="d-flex align-items-end justify-content-between">
+                    <div>
+                        <div class="h1 mb-0">{{ kpis.pending_count }}</div>
+{% with delta=kpi_deltas.pending_count %}
+{% if delta.delta_pct is not None %}
+                        <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
+                            {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
+                            {{ delta.delta_pct }}%
+                        </span>
+{% else %}
+                        <span class="text-secondary small">no comparison</span>
+{% endif %}
+{% endwith %}
+                    </div>
+{% with delta=kpi_deltas.pending_count %}
+                    {% if delta.sparkline_points %}
+                    <svg class="kpi-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
+                                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    {% endif %}
+{% endwith %}
+                </div>
+                <div class="text-secondary small mt-1">Awaiting confirmation or settlement</div>
             </div>
         </div>
     </div>
@@ -81,11 +187,33 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="subheader">Transactions (30d)</div>
-                    <div class="text-secondary"><i class="ti ti-list-details"></i></div>
+                    <div class="text-secondary small">Transactions (30d)</div>
+                    <i class="ti ti-list-details text-secondary"></i>
                 </div>
-                <div class="h1 mb-1">{{ kpis.transaction_count }}</div>
-                <div class="text-secondary small">All statuses, both directions</div>
+                <div class="d-flex align-items-end justify-content-between">
+                    <div>
+                        <div class="h1 mb-0">{{ kpis.transaction_count }}</div>
+{% with delta=kpi_deltas.transaction_count %}
+{% if delta.delta_pct is not None %}
+                        <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
+                            {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
+                            {{ delta.delta_pct }}%
+                        </span>
+{% else %}
+                        <span class="text-secondary small">no comparison</span>
+{% endif %}
+{% endwith %}
+                    </div>
+{% with delta=kpi_deltas.transaction_count %}
+                    {% if delta.sparkline_points %}
+                    <svg class="kpi-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
+                                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    {% endif %}
+{% endwith %}
+                </div>
+                <div class="text-secondary small mt-1">All statuses, both directions</div>
             </div>
         </div>
     </div>
@@ -94,11 +222,33 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="subheader">Average amount</div>
-                    <div class="text-secondary"><i class="ti ti-calculator"></i></div>
+                    <div class="text-secondary small">Average amount</div>
+                    <i class="ti ti-calculator text-secondary"></i>
                 </div>
-                <div class="h1 mb-1">{{ kpis.average_amount|intcomma }}</div>
-                <div class="text-secondary small">Mean of completed movements</div>
+                <div class="d-flex align-items-end justify-content-between">
+                    <div>
+                        <div class="h1 mb-0">{{ kpis.average_amount|intcomma }}</div>
+{% with delta=kpi_deltas.average_amount %}
+{% if delta.delta_pct is not None %}
+                        <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
+                            {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
+                            {{ delta.delta_pct }}%
+                        </span>
+{% else %}
+                        <span class="text-secondary small">no comparison</span>
+{% endif %}
+{% endwith %}
+                    </div>
+{% with delta=kpi_deltas.average_amount %}
+                    {% if delta.sparkline_points %}
+                    <svg class="kpi-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
+                                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    {% endif %}
+{% endwith %}
+                </div>
+                <div class="text-secondary small mt-1">Mean of completed movements</div>
             </div>
         </div>
     </div>
@@ -107,18 +257,22 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="subheader">Largest</div>
-                    <div class="text-secondary"><i class="ti ti-trophy"></i></div>
+                    <div class="text-secondary small">Largest</div>
+                    <i class="ti ti-trophy text-secondary"></i>
                 </div>
-                <div class="h1 mb-1">{{ kpis.largest_amount|intcomma }}</div>
-                <div class="text-secondary small text-truncate">
-                    {% if kpis.largest_counterparty %}{{ kpis.largest_counterparty }}{% else %}&mdash;{% endif %}
+                <div class="d-flex align-items-end justify-content-between">
+                    <div>
+                        <div class="h1 mb-0">{{ kpis.largest_amount|intcomma }}</div>
+
+                    </div>
+
                 </div>
+                <div class="text-secondary small mt-1">{% if kpis.largest_counterparty %}{{ kpis.largest_counterparty }}{% else %}&mdash;{% endif %}</div>
             </div>
         </div>
     </div>
+
 </div>
-
 <!-- ============================== Row 2: charts ======================== -->
 <div id="charts-empty" class="card mt-3 d-none">
     <div class="card-body">
@@ -459,6 +613,12 @@
             return el ? JSON.parse(el.textContent) : null;
         }
 
+        /* Theme colours live in CSS custom properties, so a light/dark switch
+           needs no hardcoded values here -- initCharts() re-reads them. */
+        function cssVar(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
+
         var flow = readJSON("data-flow");
         var weekly = readJSON("data-weekly");
         var statusCounts = readJSON("data-status");
@@ -474,10 +634,25 @@
             return isFinite(n) ? n : 0;
         }
 
-        // ---- empty state -------------------------------------------------
-        // Decided here rather than server-side: kpis.transaction_count is
-        // windowed to 30 days while the charts show 90 days / 12 weeks / all
-        // time, so the two can legitimately disagree.
+        function MONEY(value) {
+            return num(value).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+
+        function prettyLabel(label) {
+            return String(label)
+                .replace(/_/g, " ")
+                .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+        }
+
+        var statusKeys = choicePairs.map(function (pair) { return pair[0]; });
+        var statusLabels = choicePairs.map(function (pair) { return prettyLabel(pair[1]); });
+
+        /* Empty state decided here rather than server-side: kpis.transaction_count
+           is windowed to 30 days while the charts show 90 days / 12 weeks / all
+           time, so the two can legitimately disagree. */
         var hasFlow = flow.some(function (d) { return num(d.received) || num(d.sent); });
         var hasWeekly = weekly.some(function (d) { return num(d.received) || num(d.sent); });
         var hasStatus = Object.keys(statusCounts).some(function (k) { return statusCounts[k] > 0; });
@@ -488,62 +663,169 @@
             return;
         }
 
-        Chart.defaults.font.family = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-        Chart.defaults.color = "#6c7a91";
+        var charts = {};
+        var currentRange = 30;
 
-        var GREEN = "#2fb344";
-        var RED = "#d63939";
-        var ACCENT = "#206bc4";
-        var PALETTE = ["#206bc4", "#2fb344", "#d63939", "#f76707", "#f59f00", "#ae3ec9", "#4299e1"];
+        function palette() {
+            return [
+                cssVar("--tblr-primary"), cssVar("--tblr-green"), cssVar("--tblr-red"),
+                cssVar("--tblr-orange"), cssVar("--tblr-yellow"), cssVar("--tblr-purple"),
+                cssVar("--tblr-azure")
+            ];
+        }
 
-        function MONEY(value) {
-            return num(value).toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
+        /* A fading area fill built from the accent, so no literal colour is stored. */
+        function areaFill(color) {
+            var canvas = document.getElementById("chart-balance");
+            if (!canvas) { return color; }
+            var gradient = canvas.getContext("2d")
+                .createLinearGradient(0, 0, 0, canvas.clientHeight || 260);
+            gradient.addColorStop(0, color);
+            gradient.addColorStop(1, "transparent");
+            return gradient;
+        }
+
+        function renderFlow(days) {
+            var chart = charts.flow;
+            if (!chart) { return; }
+            var slice = flow.slice(-days);
+            chart.data.labels = slice.map(function (d) { return d.date; });
+            chart.data.datasets[0].data = slice.map(function (d) { return num(d.received); });
+            chart.data.datasets[1].data = slice.map(function (d) { return num(d.sent); });
+            chart.data.datasets[2].data = slice.map(function (d) { return num(d.net); });
+            /* 90 date labels are too dense to read. */
+            chart.options.scales.x.ticks.display = days < 90;
+            chart.update();
+        }
+
+        function initCharts() {
+            var ACCENT = cssVar("--tblr-primary");
+            var GREEN = cssVar("--tblr-green");
+            var RED = cssVar("--tblr-red");
+            var COLORS = palette();
+
+            Chart.defaults.font.family =
+                "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+            /* --tblr-secondary-color computes to light-dark(...), which the canvas
+               API cannot parse; take the resolved body colour instead. */
+            Chart.defaults.color = getComputedStyle(document.body).color;
+
+            charts.flow = new Chart(document.getElementById("chart-flow"), {
+                type: "line",
+                data: {
+                    labels: [],
+                    datasets: [
+                        { label: "Received", data: [], borderColor: GREEN, backgroundColor: GREEN, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                        { label: "Sent", data: [], borderColor: RED, backgroundColor: RED, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                        { label: "Net", data: [], borderColor: ACCENT, borderDash: [4, 4], tension: 0.3, pointRadius: 0, borderWidth: 1 }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: "index", intersect: false },
+                    plugins: {
+                        legend: { position: "bottom" },
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) { return ctx.dataset.label + ": " + MONEY(ctx.parsed.y); }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { display: true, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+
+            charts.status = new Chart(document.getElementById("chart-status"), {
+                type: "doughnut",
+                data: {
+                    labels: statusLabels,
+                    datasets: [{
+                        data: statusKeys.map(function (key) { return statusCounts[key] || 0; }),
+                        backgroundColor: COLORS,
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: "right" } },
+                    cutout: "60%"
+                }
+            });
+
+            charts.weekly = new Chart(document.getElementById("chart-weekly"), {
+                type: "bar",
+                data: {
+                    labels: weekly.map(function (d) { return d.week_start; }),
+                    datasets: [
+                        { label: "Sent", data: weekly.map(function (d) { return num(d.sent); }), backgroundColor: RED },
+                        { label: "Received", data: weekly.map(function (d) { return num(d.received); }), backgroundColor: GREEN }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: "bottom" },
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) { return ctx.dataset.label + ": " + MONEY(ctx.parsed.y); }
+                            }
+                        }
+                    },
+                    scales: { x: { stacked: false }, y: { beginAtZero: true } }
+                }
+            });
+
+            /* Walk the 90 day net flow forwards from (balance - sum of nets), so
+               the final point is exactly kpis.balance. */
+            var totalNet = flow.reduce(function (acc, d) { return acc + num(d.net); }, 0);
+            var running = num(kpis.balance) - totalNet;
+            var trajectory = flow.map(function (d) {
+                running += num(d.net);
+                return Number(running.toFixed(2));
+            });
+
+            charts.balance = new Chart(document.getElementById("chart-balance"), {
+                type: "line",
+                data: {
+                    labels: flow.map(function (d) { return d.date; }),
+                    datasets: [{
+                        label: "Balance",
+                        data: trajectory,
+                        borderColor: ACCENT,
+                        backgroundColor: areaFill(ACCENT),
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) { return "Balance: " + MONEY(ctx.parsed.y); }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { ticks: { display: false } },
+                        y: { beginAtZero: false }
+                    }
+                }
             });
         }
 
-        // ---- 1. daily net flow, with a 7 / 30 / 90 range -----------------
-        var flowChart = new Chart(document.getElementById("chart-flow"), {
-            type: "line",
-            data: {
-                labels: [],
-                datasets: [
-                    { label: "Received", data: [], borderColor: GREEN, backgroundColor: GREEN, tension: 0.3, pointRadius: 0, borderWidth: 2 },
-                    { label: "Sent", data: [], borderColor: RED, backgroundColor: RED, tension: 0.3, pointRadius: 0, borderWidth: 2 },
-                    { label: "Net", data: [], borderColor: ACCENT, borderDash: [4, 4], tension: 0.3, pointRadius: 0, borderWidth: 1 }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: "index", intersect: false },
-                plugins: {
-                    legend: { position: "bottom" },
-                    tooltip: {
-                        callbacks: {
-                            label: function (ctx) { return ctx.dataset.label + ": " + MONEY(ctx.parsed.y); }
-                        }
-                    }
-                },
-                scales: {
-                    x: { ticks: { display: true, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
-                    y: { beginAtZero: true }
-                }
-            }
-        });
-
-        function renderFlow(days) {
-            var slice = flow.slice(-days);
-            flowChart.data.labels = slice.map(function (d) { return d.date; });
-            flowChart.data.datasets[0].data = slice.map(function (d) { return num(d.received); });
-            flowChart.data.datasets[1].data = slice.map(function (d) { return num(d.sent); });
-            flowChart.data.datasets[2].data = slice.map(function (d) { return num(d.net); });
-            // 90 date labels are too dense to read.
-            flowChart.options.scales.x.ticks.display = days < 90;
-            flowChart.update();
-        }
-        renderFlow(30);
+        initCharts();
+        renderFlow(currentRange);
 
         var rangeButtons = document.querySelectorAll("[data-range]");
         Array.prototype.forEach.call(rangeButtons, function (button) {
@@ -552,104 +834,18 @@
                     other.classList.remove("active");
                 });
                 button.classList.add("active");
-                renderFlow(Number(button.getAttribute("data-range")));
+                currentRange = Number(button.getAttribute("data-range"));
+                renderFlow(currentRange);
             });
         });
 
-        // ---- 2. status breakdown ----------------------------------------
-        function prettyLabel(label) {
-            return String(label)
-                .replace(/_/g, " ")
-                .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-        }
-
-        var statusKeys = choicePairs.map(function (pair) { return pair[0]; });
-        var statusLabels = choicePairs.map(function (pair) { return prettyLabel(pair[1]); });
-
-        new Chart(document.getElementById("chart-status"), {
-            type: "doughnut",
-            data: {
-                labels: statusLabels,
-                datasets: [{
-                    data: statusKeys.map(function (key) { return statusCounts[key] || 0; }),
-                    backgroundColor: PALETTE,
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: "right" } },
-                cutout: "60%"
-            }
-        });
-
-        // ---- 3. weekly volume, grouped bars ------------------------------
-        new Chart(document.getElementById("chart-weekly"), {
-            type: "bar",
-            data: {
-                labels: weekly.map(function (d) { return d.week_start; }),
-                datasets: [
-                    { label: "Sent", data: weekly.map(function (d) { return num(d.sent); }), backgroundColor: RED },
-                    { label: "Received", data: weekly.map(function (d) { return num(d.received); }), backgroundColor: GREEN }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: "bottom" },
-                    tooltip: {
-                        callbacks: {
-                            label: function (ctx) { return ctx.dataset.label + ": " + MONEY(ctx.parsed.y); }
-                        }
-                    }
-                },
-                scales: { x: { stacked: false }, y: { beginAtZero: true } }
-            }
-        });
-
-        // ---- 4. balance trajectory --------------------------------------
-        // Walk the 90 day net flow forwards from (balance - sum of nets), so the
-        // final point is exactly kpis.balance.
-        var totalNet = flow.reduce(function (acc, d) { return acc + num(d.net); }, 0);
-        var running = num(kpis.balance) - totalNet;
-        var trajectory = flow.map(function (d) {
-            running += num(d.net);
-            return Number(running.toFixed(2));
-        });
-
-        new Chart(document.getElementById("chart-balance"), {
-            type: "line",
-            data: {
-                labels: flow.map(function (d) { return d.date; }),
-                datasets: [{
-                    label: "Balance",
-                    data: trajectory,
-                    borderColor: ACCENT,
-                    backgroundColor: "rgba(32, 107, 196, 0.15)",
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 2
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: function (ctx) { return "Balance: " + MONEY(ctx.parsed.y); }
-                        }
-                    }
-                },
-                scales: {
-                    x: { ticks: { display: false } },
-                    y: { beginAtZero: false }
-                }
-            }
+        /* The json_script payloads do not change between themes, so the charts
+           are simply rebuilt to pick up the new palette. */
+        document.addEventListener("ob:theme-changed", function () {
+            Object.keys(charts).forEach(function (key) { charts[key].destroy(); });
+            charts = {};
+            initCharts();
+            renderFlow(currentRange);
         });
     })();
 </script>

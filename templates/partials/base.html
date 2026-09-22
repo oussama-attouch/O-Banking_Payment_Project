@@ -7,6 +7,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}O-Banking{% endblock %}</title>
 
+    {% comment %}
+    Applies the stored theme before any stylesheet loads, so a dark-mode user
+    never sees a light flash. Wrapped in try/catch because localStorage throws
+    in some privacy modes.
+    {% endcomment %}
+    <script>
+        (function(){
+          try {
+            var t = localStorage.getItem('ob-theme');
+            if (t === 'dark' || t === 'light') {
+              document.documentElement.setAttribute('data-bs-theme', t);
+            }
+          } catch(e) {}
+        })();
+    </script>
+
     <link rel="stylesheet" href="{% static 'tabler/css/tabler.min.css' %}">
     <link rel="stylesheet" href="{% static 'tabler/icons/tabler-icons.min.css' %}">
     <link rel="stylesheet" href="{% static 'tabler/css/tabler-vendors.min.css' %}">
@@ -14,10 +30,38 @@
     <style>
         :root {
             --ob-accent: #206bc4;
+            --ob-delta-positive: #2fb344;
+            --ob-delta-negative: #d63939;
+            --ob-sparkline-stroke: var(--tblr-primary);
+            --ob-card-radius: var(--tblr-border-radius);
+            --ob-transition: 150ms ease;
         }
 
         body {
             font-variant-numeric: tabular-nums;
+        }
+
+        .kpi-delta {
+            font-size: 0.875rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .kpi-delta.positive {
+            color: var(--ob-delta-positive);
+        }
+
+        .kpi-delta.negative {
+            color: var(--ob-delta-negative);
+        }
+
+        .kpi-sparkline {
+            width: 60px;
+            height: 20px;
+            color: var(--ob-sparkline-stroke);
+            display: block;
         }
     </style>
 </head>

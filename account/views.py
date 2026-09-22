@@ -50,6 +50,7 @@ def dashboard(request):
         "kyc": kyc,
         "account": account,
         "kpis": analytics.get_kpis(request.user, account=account),
+        "kpi_deltas": analytics.get_kpi_deltas(request.user),
         "daily_flow_90d": analytics.get_daily_net_flow(request.user),
         "weekly_volume_12w": analytics.get_weekly_volume(request.user),
         "status_breakdown": analytics.get_status_breakdown(request.user),

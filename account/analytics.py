@@ -27,7 +27,7 @@ back to ``sender``. :func:`_received_q` and :func:`_sent_q` encode that, so a
 settled request credits the requester instead of debiting them.
 """
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.paginator import EmptyPage, Paginator
 from django.db.models import (
@@ -404,4 +404,193 @@ def get_transaction_history(user, status=None, ttype=None, page=1, per_page=20):
         "has_next": page_obj.has_next(),
         "has_prev": page_obj.has_previous(),
         "items": list(page_obj.object_list),
+    }
+
+
+# --------------------------------------------------------------- KPI deltas
+#: Sparkline geometry: a 7-point series in a 60x20 box, 2px of vertical padding.
+SPARKLINE_DAYS = 7
+SPARKLINE_WIDTH = 60
+SPARKLINE_HEIGHT = 20
+SPARKLINE_PAD = 2
+
+
+def _sparkline_points(values):
+    """Render up to :data:`SPARKLINE_DAYS` numbers as an SVG ``points`` string.
+
+    The series is right-aligned: missing days are padded with zeros **at the
+    front**, so the newest value is always the last point. With a flat series
+    (including all zeros) every point sits on the centre line at ``y=10``;
+    otherwise the maximum maps to ``y=2`` and the minimum to ``y=18``.
+
+    Note that a padded zero is a *real* zero for scaling purposes: if none of
+    the observed values is zero, the padding becomes the minimum and therefore
+    renders along the bottom edge.
+    """
+    series = [Decimal(str(value)) for value in values][-SPARKLINE_DAYS:]
+    series = [ZERO] * (SPARKLINE_DAYS - len(series)) + series
+
+    low, high = min(series), max(series)
+    step = Decimal(SPARKLINE_WIDTH) / (SPARKLINE_DAYS - 1)
+    span = high - low
+
+    parts = []
+    for index, value in enumerate(series):
+        x = step * index
+        if span == 0:
+            y = Decimal(SPARKLINE_HEIGHT) / 2
+        else:
+            # Decimal arithmetic keeps the endpoints exact: max -> 2, min -> 18.
+            y = (
+                Decimal(SPARKLINE_HEIGHT - SPARKLINE_PAD)
+                - (value - low)
+                * Decimal(SPARKLINE_HEIGHT - 2 * SPARKLINE_PAD)
+                / span
+            )
+        parts.append("%s,%s" % (_trim(x), _trim(y)))
+    return " ".join(parts)
+
+
+def _trim(value):
+    """Decimal -> "2" / "12.7" -- no trailing ``.0``, at most one decimal."""
+    if value == value.to_integral_value():
+        return str(int(value))
+    return str(value.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+
+
+def _delta_pct(current, previous):
+    """Percentage change, or ``None`` when there is nothing to compare against."""
+    if not previous:
+        return None
+    return round(float((Decimal(current) - Decimal(previous)) * 100 / Decimal(previous)), 1)
+
+
+def get_kpi_deltas(user, days=30):
+    """Current-vs-previous movement for each KPI card, plus a sparkline series.
+
+    ``current`` is the trailing ``days`` window, ``previous`` the window before
+    it. Two KPIs do not follow that pattern:
+
+    * ``balance`` is point-in-time. Its "previous" value is reconstructed by
+      subtracting the window's net flow from today's balance, the same
+      assumption the balance-trajectory chart makes.
+    * ``pending_count`` compares the last 7 days against the 7 before that, and
+      its sparkline is the number of still-pending movements created on each of
+      the last 7 days.
+
+    ``largest_amount`` is a single event, so it gets ``delta_pct = None`` and an
+    empty sparkline: a one-point trend line would be meaningless.
+
+    Query count: **3**.
+    """
+    now = timezone.now()
+    window_start = now - timedelta(days=days)
+    previous_start = window_start - timedelta(days=days)
+    completed = Q(status__in=COMPLETED_STATUSES)
+
+    # pending_count is the one KPI measured over a week rather than a month.
+    pending_start = now - timedelta(days=SPARKLINE_DAYS)
+    pending_previous_start = pending_start - timedelta(days=SPARKLINE_DAYS)
+
+    # --- query 1: both 30-day windows in one pass -------------------------
+    totals = Transaction.objects.filter(
+        _party_q(user), date__gte=previous_start
+    ).aggregate(
+        cur_received=Sum("amount", filter=Q(date__gte=window_start) & _received_q(user) & completed),
+        prev_received=Sum("amount", filter=Q(date__lt=window_start) & _received_q(user) & completed),
+        cur_sent=Sum("amount", filter=Q(date__gte=window_start) & _sent_q(user) & completed),
+        prev_sent=Sum("amount", filter=Q(date__lt=window_start) & _sent_q(user) & completed),
+        cur_count=Count("pk", filter=Q(date__gte=window_start)),
+        prev_count=Count("pk", filter=Q(date__lt=window_start)),
+        cur_average=Avg("amount", filter=Q(date__gte=window_start) & completed),
+        prev_average=Avg("amount", filter=Q(date__lt=window_start) & completed),
+        cur_largest=Max("amount", filter=Q(date__gte=window_start) & completed),
+        prev_largest=Max("amount", filter=Q(date__lt=window_start) & completed),
+        cur_pending=Count("pk", filter=Q(date__gte=pending_start) & Q(status__in=PENDING_STATUSES)),
+        prev_pending=Count(
+            "pk",
+            filter=Q(date__gte=pending_previous_start)
+            & Q(date__lt=pending_start)
+            & Q(status__in=PENDING_STATUSES),
+        ),
+    )
+
+    cur_received = _money(totals["cur_received"])
+    cur_sent = _money(totals["cur_sent"])
+    prev_received = _money(totals["prev_received"])
+    prev_sent = _money(totals["prev_sent"])
+    cur_net = (cur_received - cur_sent).quantize(ZERO)
+    prev_net = (prev_received - prev_sent).quantize(ZERO)
+
+    # --- query 2: the last 7 days, one row per day ------------------------
+    today = timezone.localdate()
+    flow_start = today - timedelta(days=SPARKLINE_DAYS - 1)
+    daily_rows = (
+        Transaction.objects.filter(
+            _party_q(user), date__date__gte=flow_start
+        )
+        .annotate(bucket=TruncDate("date"))
+        .values("bucket")
+        .annotate(
+            received=Sum("amount", filter=_received_q(user) & completed),
+            sent=Sum("amount", filter=_sent_q(user) & completed),
+            count=Count("pk"),
+            pending=Count("pk", filter=Q(status__in=PENDING_STATUSES)),
+        )
+    )
+    by_day = {row["bucket"]: row for row in daily_rows}
+
+    daily_received, daily_sent, daily_count, daily_pending = [], [], [], []
+    for offset in range(SPARKLINE_DAYS):
+        row = by_day.get(flow_start + timedelta(days=offset))
+        daily_received.append(_money(row["received"]) if row else ZERO)
+        daily_sent.append(_money(row["sent"]) if row else ZERO)
+        daily_count.append(row["count"] if row else 0)
+        daily_pending.append(row["pending"] if row else 0)
+
+    daily_net = [r - s for r, s in zip(daily_received, daily_sent)]
+
+    # --- query 3: today's balance ----------------------------------------
+    account = Account.objects.filter(user=user).only("account_balance").first()
+    balance_now = _money(account.account_balance) if account else ZERO
+
+    # The balance a full window ago: today's balance minus the window's net flow.
+    # Deliberately the *days* window (not the 7 day sparkline window) -- a
+    # movement from 10 days ago belongs in this comparison but not in the
+    # 7-point series.
+    balance_window_ago = (balance_now - cur_net).quantize(ZERO)
+
+    # The sparkline, by contrast, is a 7 day closing-balance series, so it is
+    # anchored a week back and walked forward.
+    balance_week_ago = balance_now - sum(daily_net, ZERO)
+    balance_series, running = [], balance_week_ago
+    for value in daily_net:
+        running += value
+        balance_series.append(running)
+
+    def entry(current, previous, series=None, sparkline=True):
+        return {
+            "current": current,
+            "previous": previous,
+            "delta_pct": _delta_pct(current, previous),
+            "sparkline_points": _sparkline_points(series) if sparkline else "",
+        }
+
+    return {
+        "balance": entry(balance_now, balance_window_ago, balance_series),
+        "received": entry(cur_received, prev_received, daily_received),
+        "sent": entry(cur_sent, prev_sent, daily_sent),
+        "net": entry(cur_net, prev_net, daily_net),
+        "transaction_count": entry(totals["cur_count"], totals["prev_count"], daily_count),
+        "average_amount": entry(
+            _money(totals["cur_average"]), _money(totals["prev_average"]), daily_received
+        ),
+        "pending_count": entry(totals["cur_pending"], totals["prev_pending"], daily_pending),
+        # A largest-ever single movement cannot be trended.
+        "largest_amount": {
+            "current": _money(totals["cur_largest"]),
+            "previous": _money(totals["prev_largest"]),
+            "delta_pct": None,
+            "sparkline_points": "",
+        },
     }

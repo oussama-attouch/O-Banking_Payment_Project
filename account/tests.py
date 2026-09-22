@@ -7,6 +7,7 @@ instance, so any later ``User.save()`` (which Django itself performs on every
 login via ``update_last_login``) wrote that cached row back verbatim and
 silently reverted balance changes made through a different Account instance.
 """
+from datetime import timedelta
 from decimal import Decimal
 from io import BytesIO
 
@@ -527,3 +528,140 @@ class KYCSubmissionFlagTests(DashboardAnalyticsTestBase):
             "kyc_confirmed is an admin/compliance action and must stay false",
         )
         self.assertTrue(KYC.objects.filter(user=self.alice).exists())
+
+
+# =====================================================================
+# Phase 2b-1  KPI deltas and sparklines
+# =====================================================================
+FLAT_SPARKLINE = "0,10 10,10 20,10 30,10 40,10 50,10 60,10"
+
+
+class KPIDeltaTests(DashboardAnalyticsTestBase):
+
+    def parse_points(self, text):
+        """'x,y x,y ...' -> [(x, y), ...] as floats."""
+        return [
+            (float(pair.split(",")[0]), float(pair.split(",")[1]))
+            for pair in text.split()
+        ]
+
+    # ------------------------------------------------------------ shape
+    def test_kpi_deltas_zero_for_fresh_user(self):
+        deltas = analytics.get_kpi_deltas(self.dave)
+
+        self.assertEqual(
+            set(deltas),
+            {"balance", "received", "sent", "net", "transaction_count",
+             "average_amount", "pending_count", "largest_amount"},
+        )
+        for key, entry in deltas.items():
+            with self.subTest(kpi=key):
+                self.assertIsNone(
+                    entry["delta_pct"],
+                    "%s: nothing to compare against, so delta_pct must be None" % key,
+                )
+        for key in ("balance", "received", "sent", "net", "transaction_count",
+                    "average_amount", "pending_count"):
+            with self.subTest(kpi=key):
+                self.assertEqual(deltas[key]["sparkline_points"], FLAT_SPARKLINE)
+        self.assertEqual(deltas["largest_amount"]["sparkline_points"], "")
+
+    # -------------------------------------------------------------- math
+    def test_kpi_deltas_pct_math(self):
+        # Previous window: 45 days ago. Current window: now.
+        self.make_txn(self.bob, self.alice, "50.00",
+                      when=timezone.now() - timedelta(days=45))
+        self.make_txn(self.bob, self.alice, "100.00")
+
+        deltas = analytics.get_kpi_deltas(self.alice)
+        received = deltas["received"]
+        self.assertEqual(received["current"], Decimal("100.00"))
+        self.assertEqual(received["previous"], Decimal("50.00"))
+        # (100 - 50) / 50 * 100 = 100.0
+        self.assertAlmostEqual(received["delta_pct"], 100.0, delta=0.1)
+
+        # A brand-new metric has nothing to compare against.
+        self.assertIsNone(deltas["sent"]["delta_pct"])
+
+        # balance is point-in-time: "previous" subtracts the *days* window's net
+        # flow from today's balance. The 10-day-old movement is inside that
+        # window but outside the 7-point sparkline window, so it distinguishes
+        # the two anchors.
+        Account.objects.filter(pk=self.alice_acct.pk).update(
+            account_balance=Decimal("500.00")
+        )
+        self.make_txn(self.bob, self.alice, "30.00",
+                      when=timezone.now() - timedelta(days=10))
+        balance = analytics.get_kpi_deltas(self.alice)["balance"]
+        self.assertEqual(balance["current"], Decimal("500.00"))
+        self.assertEqual(
+            balance["previous"], Decimal("370.00"),
+            "balance.previous must span the full 30-day window (130.00 in), "
+            "not just the 7-day sparkline window (100.00 in)",
+        )
+        self.assertAlmostEqual(balance["delta_pct"], 35.1, delta=0.1)
+
+    # -------------------------------------------------------- sparkline
+    def test_kpi_deltas_sparkline_normalization(self):
+        """The largest value maps to y=2 and the smallest to y=18."""
+        amounts = ["10.00", "20.00", "30.00", "40.00", "50.00", "60.00", "70.00"]
+        for offset, amount in enumerate(amounts):
+            self.make_txn(self.bob, self.alice, amount,
+                          when=timezone.now() - timedelta(days=6 - offset))
+
+        points = self.parse_points(
+            analytics.get_kpi_deltas(self.alice)["received"]["sparkline_points"]
+        )
+        self.assertEqual(len(points), 7)
+        self.assertEqual([x for x, _ in points], [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0])
+
+        ys = [y for _, y in points]
+        self.assertEqual(ys[0], 18.0, "smallest value (10.00) must sit at y=18")
+        self.assertEqual(ys[-1], 2.0, "largest value (70.00) must sit at y=2")
+        self.assertEqual(min(ys), 2.0)
+        self.assertEqual(max(ys), 18.0)
+        # Values increase, so y must decrease monotonically.
+        self.assertEqual(ys, sorted(ys, reverse=True))
+
+    def test_kpi_deltas_sparkline_pads_missing_days(self):
+        """Only 3 days of data still yields 7 points, padded at the FRONT.
+
+        Documented behaviour: padding uses the value 0, and that zero becomes
+        the series minimum -- so the padded points render along the bottom edge
+        (y=18), not the centre line. The centre line (y=10) is only reached when
+        every point in the series is equal.
+        """
+        for offset, amount in enumerate(["5.00", "10.00", "15.00"]):
+            self.make_txn(self.bob, self.alice, amount,
+                          when=timezone.now() - timedelta(days=2 - offset))
+
+        points = self.parse_points(
+            analytics.get_kpi_deltas(self.alice)["received"]["sparkline_points"]
+        )
+        self.assertEqual(len(points), 7)
+        ys = [y for _, y in points]
+        self.assertEqual(ys[:4], [18.0, 18.0, 18.0, 18.0],
+                         "the four padded days are value 0 -> the series minimum")
+        # The final three reflect the real 5 / 10 / 15 series.
+        self.assertGreater(ys[4], ys[5])
+        self.assertGreater(ys[5], ys[6])
+        self.assertEqual(ys[6], 2.0)
+
+    def test_kpi_deltas_largest_has_no_sparkline(self):
+        self.make_txn(self.bob, self.alice, "123.00")
+        largest = analytics.get_kpi_deltas(self.alice)["largest_amount"]
+        self.assertEqual(largest["sparkline_points"], "")
+        self.assertIsNone(largest["delta_pct"])
+        self.assertEqual(largest["current"], Decimal("123.00"))
+
+    # ---------------------------------------------------- query budget
+    def test_kpi_deltas_query_budget(self):
+        """Three queries today; the contract is at most four."""
+        self.make_txn(self.bob, self.alice, "10.00")
+        with CaptureQueriesContext(connection) as captured:
+            analytics.get_kpi_deltas(self.alice)
+        self.assertLessEqual(
+            len(captured), 4,
+            "get_kpi_deltas used %d queries, budget is 4" % len(captured),
+        )
+        self.assertEqual(len(captured), 3, "implementation detail moved")
