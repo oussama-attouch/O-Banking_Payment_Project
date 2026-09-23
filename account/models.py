@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 import uuid
 from shortuuid.django_fields import ShortUUIDField
@@ -165,3 +166,65 @@ class KYC(models.Model):
 def create_account(sender, instance, created, **kwargs):
     if created:
         Account.objects.create(user=instance)
+
+
+# Define the Recipient model: a saved-payee list, one row per (owner, target
+# account) pair. Phase 5f-2 builds the views and templates that use it; this
+# phase is the model, its migration, its admin and its tests only.
+class Recipient(models.Model):
+    """A saved payee. One user saves another account they transact with,
+    optionally with a nickname distinct from the target's own name."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="recipients",
+    )
+    target_account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name="saved_by",
+    )
+    nickname = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "target_account"],
+                name="unique_recipient_per_user",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.display_name} → {self.target_account.account_number}"
+
+    @property
+    def display_name(self):
+        """Nickname if set, else the target's KYC full_name,
+        else the target's username."""
+        if self.nickname:
+            return self.nickname
+        kyc = getattr(self.target_account.user, "kyc", None)
+        if kyc is not None and kyc.full_name:
+            return kyc.full_name
+        return self.target_account.user.username
+
+    def save(self, *args, **kwargs):
+        # Reject saving yourself as a recipient. This mirrors the
+        # self-transfer guard in core/transfer.py::process_amount_transfer.
+        # Do NOT raise ValueError — use ValidationError so it surfaces in
+        # forms and admin cleanly.
+        if self.target_account_id and self.user_id:
+            if self.target_account.user_id == self.user_id:
+                raise ValidationError("You cannot save your own account as a recipient.")
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.target_account_id and self.user_id:
+            if self.target_account.user_id == self.user_id:
+                raise ValidationError({"target_account": "You cannot save your own account as a recipient."})

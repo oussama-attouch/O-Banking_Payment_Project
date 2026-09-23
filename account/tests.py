@@ -13,8 +13,9 @@ from io import BytesIO, StringIO
 import csv
 import re
 
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import connection
+from django.db import IntegrityError, connection, models, transaction
 from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
@@ -22,7 +23,7 @@ from django.utils import timezone
 from PIL import Image
 
 from account import analytics
-from account.models import Account, KYC
+from account.models import Account, KYC, Recipient
 from core.models import Transaction
 from userauths.models import User
 
@@ -1001,3 +1002,114 @@ class StatementsTests(TestCase):
             for cell in (row[3], row[7]):
                 self.assertFalse(cell.startswith(("=", "+", "-", "@")),
                                  "unescaped formula cell: %r" % cell)
+
+
+# =====================================================================
+# Phase 5f-1  saved payees
+# =====================================================================
+class RecipientTests(TestCase):
+    """account.Recipient: the saved-payee list.
+
+    Model-only coverage -- Phase 5f-2 adds the views that use it. Everything
+    here runs against the test database, never db.sqlite3.
+    """
+
+    def setUp(self):
+        self.alice, self.alice_acct = self.make_user("rec_alice", kyc=True)
+        self.bob, self.bob_acct = self.make_user("rec_bob", kyc=True)
+        self.carol, self.carol_acct = self.make_user("rec_carol", kyc=False)
+
+    def make_user(self, name, kyc):
+        user = User.objects.create_user(
+            username=name, email="%s@test.invalid" % name, password=PASSWORD
+        )
+        acct = Account.objects.get(user=user)
+        if kyc:
+            KYC.objects.create(
+                user=user,
+                account=acct,
+                full_name="%s Person" % name.title(),
+                nationality="MA",
+                marrital_status="single",
+                gender="male",
+                identity_type="passport",
+                date_of_birth=timezone.now(),
+                signature="kyc/test.png",
+                country="MA",
+                city="Casablanca",
+                state="Casablanca",
+                mobile="0600000000",
+                fax="",
+            )
+        return user, acct
+
+    # ---------------------------------------------------------- creation
+    def test_recipient_can_be_created(self):
+        recipient = Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
+        self.assertTrue(Recipient.objects.filter(pk=recipient.pk).exists())
+        self.assertEqual(recipient.user_id, self.bob.pk)
+        self.assertEqual(recipient.target_account_id, self.alice_acct.pk)
+        self.assertEqual(recipient.nickname, "")
+        self.assertEqual(recipient.display_name, "Rec_Alice Person")
+        # The reverse accessors are the ones the 5f-2 list view will use.
+        self.assertEqual(list(self.bob.recipients.all()), [recipient])
+        self.assertEqual(list(self.alice_acct.saved_by.all()), [recipient])
+
+    def test_recipient_nickname_overrides_display_name(self):
+        recipient = Recipient.objects.create(
+            user=self.bob, target_account=self.alice_acct, nickname="Alice (work)"
+        )
+        self.assertEqual(recipient.display_name, "Alice (work)")
+        self.assertIn("Alice (work)", str(recipient))
+
+    def test_recipient_display_name_falls_back_to_username(self):
+        """carol has no KYC row, so the username is all there is to show."""
+        self.assertFalse(KYC.objects.filter(user=self.carol).exists())
+        recipient = Recipient.objects.create(user=self.bob, target_account=self.carol_acct)
+        self.assertEqual(recipient.display_name, "rec_carol")
+
+    # ------------------------------------------------------------ guards
+    def test_recipient_cannot_save_self(self):
+        recipient = Recipient(user=self.alice, target_account=self.alice_acct)
+        with self.assertRaises(ValidationError):
+            recipient.save()
+        # The form/admin path goes through clean() instead, which attaches the
+        # message to the target_account field.
+        with self.assertRaises(ValidationError) as caught:
+            Recipient(user=self.alice, target_account=self.alice_acct).full_clean()
+        self.assertIn("target_account", caught.exception.message_dict)
+        self.assertFalse(Recipient.objects.filter(user=self.alice).exists())
+
+    def test_recipient_unique_per_user(self):
+        Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
+        with self.assertRaises(IntegrityError):
+            # Inner atomic block: a caught IntegrityError would otherwise leave
+            # the test's own transaction unusable.
+            with transaction.atomic():
+                Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
+        self.assertEqual(
+            Recipient.objects.filter(user=self.bob, target_account=self.alice_acct).count(), 1
+        )
+        constraint = next(
+            c for c in Recipient._meta.constraints
+            if isinstance(c, models.UniqueConstraint)
+        )
+        self.assertEqual(constraint.name, "unique_recipient_per_user")
+        self.assertEqual(set(constraint.fields), {"user", "target_account"})
+
+    def test_recipient_different_users_can_save_same_target(self):
+        first = Recipient.objects.create(user=self.alice, target_account=self.carol_acct)
+        second = Recipient.objects.create(user=self.bob, target_account=self.carol_acct)
+        self.assertEqual(Recipient.objects.filter(target_account=self.carol_acct).count(), 2)
+        self.assertNotEqual(first.pk, second.pk)
+
+    # ----------------------------------------------------------- cascades
+    def test_recipient_cascade_on_target_account_delete(self):
+        recipient = Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
+        self.alice_acct.delete()
+        self.assertFalse(Recipient.objects.filter(pk=recipient.pk).exists())
+
+    def test_recipient_cascade_on_user_delete(self):
+        recipient = Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
+        self.bob.delete()
+        self.assertFalse(Recipient.objects.filter(pk=recipient.pk).exists())
