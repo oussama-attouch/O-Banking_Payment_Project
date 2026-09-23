@@ -310,6 +310,10 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary active" data-range="30">30D</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" data-range="90">90D</button>
                 </div>
+                <button type="button" class="btn btn-ghost-secondary btn-icon btn-sm ms-2"
+                        data-chart-export="chart-flow" aria-label="Download chart">
+                    <i class="ti ti-download"></i>
+                </button>
             </div>
             <div class="card-body">
                 <canvas id="chart-flow" style="height: 16rem;"></canvas>
@@ -321,6 +325,10 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Status breakdown</h3>
+                <button type="button" class="btn btn-ghost-secondary btn-icon btn-sm ms-auto"
+                        data-chart-export="chart-status" aria-label="Download chart">
+                    <i class="ti ti-download"></i>
+                </button>
             </div>
             <div class="card-body">
                 <canvas id="chart-status" style="height: 16rem;"></canvas>
@@ -332,6 +340,10 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Weekly volume</h3>
+                <button type="button" class="btn btn-ghost-secondary btn-icon btn-sm ms-auto"
+                        data-chart-export="chart-weekly" aria-label="Download chart">
+                    <i class="ti ti-download"></i>
+                </button>
             </div>
             <div class="card-body">
                 <canvas id="chart-weekly" style="height: 16rem;"></canvas>
@@ -344,6 +356,10 @@
             <div class="card-header">
                 <h3 class="card-title">Balance trajectory</h3>
                 <div class="text-secondary small ms-auto">Last 90 days</div>
+                <button type="button" class="btn btn-ghost-secondary btn-icon btn-sm ms-2"
+                        data-chart-export="chart-balance" aria-label="Download chart">
+                    <i class="ti ti-download"></i>
+                </button>
             </div>
             <div class="card-body">
                 <canvas id="chart-balance" style="height: 16rem;"></canvas>
@@ -557,7 +573,7 @@
 
 <!-- ========================== Row 6: KYC status ======================== -->
 <div class="row row-deck row-cards mt-3">
-    <div class="col-lg-6">
+    <div class="col-12">
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">KYC status</h3>
@@ -613,6 +629,41 @@
             return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
         }
 
+        /* Tabler declares several tokens as light-dark(...), which the canvas API
+           cannot parse -- assigning one to fillStyle is silently ignored. Resolve
+           any token to a real colour by letting the browser compute it on a probe
+           element, so the value still comes from the CSS variable. */
+        function cssColor(name, fallback) {
+            var raw = cssVar(name);
+            if (!raw) { return fallback; }
+            var probe = document.createElement("span");
+            probe.style.display = "none";
+            probe.style.color = raw;
+            document.body.appendChild(probe);
+            var resolved = getComputedStyle(probe).color;
+            probe.remove();
+            return resolved || fallback;
+        }
+
+        /* Called by initCharts() before any chart is constructed, and re-applied
+           on every theme rebuild, so the palette follows the active theme. */
+        function applyChartDefaults() {
+            Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+            Chart.defaults.font.size = 12;
+            Chart.defaults.color = cssColor("--tblr-secondary-color", "#5a5a6e");
+            Chart.defaults.borderColor = cssColor("--tblr-border-color", "rgba(0,0,0,0.08)");
+            Chart.defaults.plugins.tooltip.backgroundColor =
+                cssColor("--tblr-body-color", "#14141a");
+            Chart.defaults.plugins.tooltip.titleColor = cssColor("--tblr-body-bg", "#ffffff");
+            Chart.defaults.plugins.tooltip.bodyColor = cssColor("--tblr-body-bg", "#ffffff");
+            Chart.defaults.plugins.tooltip.cornerRadius = 6;
+            Chart.defaults.plugins.tooltip.padding = 10;
+            Chart.defaults.plugins.tooltip.displayColors = true;
+            Chart.defaults.plugins.legend.labels.usePointStyle = true;
+            Chart.defaults.plugins.legend.labels.boxWidth = 8;
+            Chart.defaults.plugins.legend.labels.padding = 16;
+        }
+
         var flow = readJSON("data-flow");
         var weekly = readJSON("data-weekly");
         var statusCounts = readJSON("data-status");
@@ -628,11 +679,21 @@
             return isFinite(n) ? n : 0;
         }
 
-        function MONEY(value) {
-            return num(value).toLocaleString(undefined, {
+        function fmtAmount(value) {
+            var n = Number(value);
+            if (!isFinite(n)) { return ""; }
+            return n.toLocaleString("en-US", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
             });
+        }
+
+        /* Shared by the line, bar and area tooltips; the doughnut plots counts and
+           uses its own formatter. */
+        function tooltipLabel(ctx) {
+            var label = ctx.dataset.label || "";
+            var raw = ctx.parsed.y !== undefined ? ctx.parsed.y : ctx.parsed;
+            return label ? (label + ": " + fmtAmount(raw)) : fmtAmount(raw);
         }
 
         function prettyLabel(label) {
@@ -680,7 +741,7 @@
         }
 
         function renderFlow(days) {
-            var chart = charts.flow;
+            var chart = charts["chart-flow"];
             if (!chart) { return; }
             var slice = flow.slice(-days);
             chart.data.labels = slice.map(function (d) { return d.date; });
@@ -697,34 +758,38 @@
             var GREEN = cssVar("--tblr-green");
             var RED = cssVar("--tblr-red");
             var COLORS = palette();
+            var SURFACE = cssColor("--tblr-body-bg", "#ffffff");
 
-            Chart.defaults.font.family =
-                "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-            /* --tblr-secondary-color computes to light-dark(...), which the canvas
-               API cannot parse; take the resolved body colour instead. */
-            Chart.defaults.color = getComputedStyle(document.body).color;
+            applyChartDefaults();
 
-            charts.flow = new Chart(document.getElementById("chart-flow"), {
+            charts["chart-flow"] = new Chart(document.getElementById("chart-flow"), {
                 type: "line",
                 data: {
                     labels: [],
                     datasets: [
-                        { label: "Received", data: [], borderColor: GREEN, backgroundColor: GREEN, tension: 0.3, pointRadius: 0, borderWidth: 2 },
-                        { label: "Sent", data: [], borderColor: RED, backgroundColor: RED, tension: 0.3, pointRadius: 0, borderWidth: 2 },
-                        { label: "Net", data: [], borderColor: ACCENT, borderDash: [4, 4], tension: 0.3, pointRadius: 0, borderWidth: 1 }
+                        { label: "Received", data: [], borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2 },
+                        { label: "Sent", data: [], borderColor: RED, backgroundColor: RED, borderWidth: 2 },
+                        { label: "Net", data: [], borderColor: ACCENT, borderDash: [4, 4], borderWidth: 1 }
                     ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     interaction: { mode: "index", intersect: false },
+                    /* Point and line styling lives here now, not per dataset, so the
+                       hover behaviour is set in one place. */
+                    elements: {
+                        point: {
+                            radius: 0,
+                            hoverRadius: 4,
+                            hoverBorderWidth: 2,
+                            hoverBackgroundColor: SURFACE
+                        },
+                        line: { tension: 0.35 }
+                    },
                     plugins: {
                         legend: { position: "bottom" },
-                        tooltip: {
-                            callbacks: {
-                                label: function (ctx) { return ctx.dataset.label + ": " + MONEY(ctx.parsed.y); }
-                            }
-                        }
+                        tooltip: { callbacks: { label: tooltipLabel } }
                     },
                     scales: {
                         x: { ticks: { display: true, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
@@ -733,7 +798,7 @@
                 }
             });
 
-            charts.status = new Chart(document.getElementById("chart-status"), {
+            charts["chart-status"] = new Chart(document.getElementById("chart-status"), {
                 type: "doughnut",
                 data: {
                     labels: statusLabels,
@@ -746,12 +811,21 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { position: "right" } },
+                    elements: { arc: { borderWidth: 0, hoverOffset: 6 } },
+                    plugins: {
+                        legend: { position: "right" },
+                        /* Counts, not currency: this chart plots transaction counts. */
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) { return (ctx.label || "") + ": " + ctx.parsed; }
+                            }
+                        }
+                    },
                     cutout: "60%"
                 }
             });
 
-            charts.weekly = new Chart(document.getElementById("chart-weekly"), {
+            charts["chart-weekly"] = new Chart(document.getElementById("chart-weekly"), {
                 type: "bar",
                 data: {
                     labels: weekly.map(function (d) { return d.week_start; }),
@@ -763,13 +837,10 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    elements: { bar: { borderRadius: 4 } },
                     plugins: {
                         legend: { position: "bottom" },
-                        tooltip: {
-                            callbacks: {
-                                label: function (ctx) { return ctx.dataset.label + ": " + MONEY(ctx.parsed.y); }
-                            }
-                        }
+                        tooltip: { callbacks: { label: tooltipLabel } }
                     },
                     scales: { x: { stacked: false }, y: { beginAtZero: true } }
                 }
@@ -784,7 +855,7 @@
                 return Number(running.toFixed(2));
             });
 
-            charts.balance = new Chart(document.getElementById("chart-balance"), {
+            charts["chart-balance"] = new Chart(document.getElementById("chart-balance"), {
                 type: "line",
                 data: {
                     labels: flow.map(function (d) { return d.date; }),
@@ -794,21 +865,24 @@
                         borderColor: ACCENT,
                         backgroundColor: areaFill(ACCENT),
                         fill: true,
-                        tension: 0.3,
-                        pointRadius: 0,
                         borderWidth: 2
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    elements: {
+                        point: {
+                            radius: 0,
+                            hoverRadius: 4,
+                            hoverBorderWidth: 2,
+                            hoverBackgroundColor: SURFACE
+                        },
+                        line: { tension: 0.35 }
+                    },
                     plugins: {
                         legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                label: function (ctx) { return "Balance: " + MONEY(ctx.parsed.y); }
-                            }
-                        }
+                        tooltip: { callbacks: { label: tooltipLabel } }
                     },
                     scales: {
                         x: { ticks: { display: false } },
@@ -818,19 +892,65 @@
             });
         }
 
-        initCharts();
-        renderFlow(currentRange);
+        /* The chosen range survives a reload. localStorage can throw (private
+           modes), so both accessors are guarded. */
+        var RANGE_KEY = "ob-flow-range";
+
+        function readStoredRange() {
+            try {
+                return localStorage.getItem(RANGE_KEY);
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function storeRange(value) {
+            try {
+                localStorage.setItem(RANGE_KEY, String(value));
+            } catch (e) { /* storage unavailable -- the choice is simply not kept */ }
+        }
 
         var rangeButtons = document.querySelectorAll("[data-range]");
+
+        function activateRange(days) {
+            currentRange = days;
+            Array.prototype.forEach.call(rangeButtons, function (button) {
+                button.classList.toggle(
+                    "active", Number(button.getAttribute("data-range")) === days
+                );
+            });
+            renderFlow(days);
+        }
+
+        /* Restore the stored choice before the user interacts with the selector. */
+        var storedRange = Number(readStoredRange());
+        if (storedRange === 7 || storedRange === 30 || storedRange === 90) {
+            currentRange = storedRange;
+        }
+
+        initCharts();
+        activateRange(currentRange);
+
         Array.prototype.forEach.call(rangeButtons, function (button) {
             button.addEventListener("click", function () {
-                Array.prototype.forEach.call(rangeButtons, function (other) {
-                    other.classList.remove("active");
-                });
-                button.classList.add("active");
-                currentRange = Number(button.getAttribute("data-range"));
-                renderFlow(currentRange);
+                var days = Number(button.getAttribute("data-range"));
+                activateRange(days);
+                storeRange(days);
             });
+        });
+
+        /* One delegated handler covers the download buttons on all four cards,
+           including charts rebuilt after a theme change. */
+        document.addEventListener("click", function (e) {
+            var btn = e.target.closest("[data-chart-export]");
+            if (!btn) { return; }
+            var id = btn.getAttribute("data-chart-export");
+            var chart = charts[id];
+            if (!chart) { return; }
+            var a = document.createElement("a");
+            a.href = chart.toBase64Image("image/png", 1);
+            a.download = "o-banking-" + id + ".png";
+            a.click();
         });
 
         /* The json_script payloads do not change between themes, so the charts
