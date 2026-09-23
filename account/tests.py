@@ -546,7 +546,7 @@ class FilterTests(DashboardAnalyticsTestBase):
 
     # ----------------------------------------------------------------- type
     def test_dashboard_type_filter_transfers(self):
-        response = self.client.get(reverse("account:dashboard"), {"type": "transfer"})
+        response = self.client.get(reverse("account:dashboard"), {"txn_type": "transfer"})
         self.assertEqual(response.context["active_type"], "transfer")
         self.assertEqual(response.context["active_type_label"], "Transfers")
 
@@ -560,21 +560,21 @@ class FilterTests(DashboardAnalyticsTestBase):
         self.assertEqual(types, {"transfer"})
 
     def test_dashboard_invalid_type_falls_back(self):
-        response = self.client.get(reverse("account:dashboard"), {"type": "garbage"})
+        response = self.client.get(reverse("account:dashboard"), {"txn_type": "garbage"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["active_type"], "all")
         self.assertEqual(response.context["active_type_label"], "All types")
 
     def test_dashboard_combined_filters(self):
         response = self.client.get(
-            reverse("account:dashboard"), {"period": "7d", "type": "transfer"}
+            reverse("account:dashboard"), {"period": "7d", "txn_type": "transfer"}
         )
         self.assertEqual(response.context["active_period"], "7d")
         self.assertEqual(response.context["active_type"], "transfer")
         self.assertEqual(len(response.context["daily_flow"]), 7)
         kpis = response.context["kpis"]
         self.assertEqual(kpis["received"], Decimal("100.00"),
-                         "the settled request must be excluded by ?type=transfer")
+                         "the settled request must be excluded by ?txn_type=transfer")
         self.assertEqual(kpis["transaction_count"], 3)
 
     # --------------------------------------------------------------- labels
@@ -608,7 +608,7 @@ class FilterTests(DashboardAnalyticsTestBase):
     # ------------------------------------------------------------- JSON twin
     def test_dashboard_data_endpoint_respects_filters(self):
         response = self.client.get(
-            reverse("account:dashboard-data"), {"period": "7d", "type": "transfer"}
+            reverse("account:dashboard-data"), {"period": "7d", "txn_type": "transfer"}
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -629,9 +629,52 @@ class FilterTests(DashboardAnalyticsTestBase):
 
         # An invalid pair falls back to the documented defaults, not to an error.
         fallback = self.client.get(
-            reverse("account:dashboard-data"), {"period": "x", "type": "y"}
+            reverse("account:dashboard-data"), {"period": "x", "txn_type": "y"}
         ).json()
         self.assertEqual(len(fallback["daily_flow"]), 30)
+
+    # -------------------------------------------------- filter decoupling
+    def test_history_form_and_page_filter_are_independent(self):
+        """The page bar reads ?txn_type=; the history table reads ?type=.
+
+        They used to share ?type=, which made the page filter scope the history
+        table and made a history submit reset the period.
+        """
+        response = self.client.get(
+            reverse("account:dashboard"),
+            {"period": "7d", "txn_type": "transfer", "status": "completed"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["active_period"], "7d")
+        self.assertEqual(response.context["active_type"], "transfer")
+        self.assertEqual(response.context["history_status"], "completed")
+        # The history table honours its own ?type= and nothing else.
+        self.assertEqual(response.context["history_type"], "")
+
+        # ?type= must no longer reach the page-level bar...
+        legacy = self.client.get(
+            reverse("account:dashboard"), {"period": "7d", "type": "transfer"}
+        )
+        self.assertEqual(
+            legacy.context["active_type"], "all",
+            "?type= belongs to the history form and must not drive the page filter",
+        )
+        self.assertEqual(legacy.context["history_type"], "transfer")
+        # ...while the period still applies to the page.
+        self.assertEqual(legacy.context["active_period"], "7d")
+
+        # The history form carries the period forward and keeps its own filters.
+        body = response.content.decode()
+        self.assertIn('name="period"', body)
+        self.assertIn('value="7d"', body)
+        self.assertIn('name="status"', body)
+        self.assertIn('name="type"', body)
+        # The bar's links emit txn_type, never the history parameter name --
+        # and they carry the active type rather than resetting it.
+        self.assertIn("?period=90d&txn_type=transfer", body)
+        self.assertIn("?period=7d&txn_type=all", body)
+        self.assertNotIn("?period=90d&type=transfer", body)
+        self.assertNotIn("?period=7d&type=transfer", body)
 
 
 # =====================================================================

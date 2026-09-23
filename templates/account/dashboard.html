@@ -19,13 +19,13 @@
             <div class="d-flex flex-wrap gap-2">
                 <div class="btn-group" role="group" aria-label="Period filter">
                     {% for key, label in period_choices %}
-                    <a href="?period={{ key }}&type={{ active_type }}"
+                    <a href="?period={{ key }}&txn_type={{ active_type }}"
                        class="btn btn-sm {% if active_period == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ label }}</a>
                     {% endfor %}
                 </div>
                 <div class="btn-group" role="group" aria-label="Type filter">
                     {% for key, label in type_choices %}
-                    <a href="?period={{ active_period }}&type={{ key }}"
+                    <a href="?period={{ active_period }}&txn_type={{ key }}"
                        class="btn btn-sm {% if active_type == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ label }}</a>
                     {% endfor %}
                 </div>
@@ -494,6 +494,12 @@
 
     <div class="card-body">
         <form method="get" class="row g-2 align-items-center">
+            {% comment %}
+            Keep the page-level period across a history submit. The bar's own
+            txn_type is deliberately NOT carried: history's `type` select is its
+            own filter and the two must not overwrite each other.
+            {% endcomment %}
+            <input type="hidden" name="period" value="{{ active_period }}">
             <div class="col-auto">
                 <select name="status" class="form-select" aria-label="Filter by status">
                     <option value="">All statuses</option>

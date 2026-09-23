@@ -62,11 +62,16 @@ def _dashboard_filters(request):
     Both values come straight off the query string, so both are validated
     against the choice tables before use; anything unrecognised falls back to the
     default rather than reaching a queryset.
+
+    The type filter reads ``?txn_type=``, not ``?type=``. ``?type=`` belongs to
+    the transaction-history form, which has posted it since before the page-level
+    filter existed; sharing the name meant the bar silently scoped the history
+    table and the history form silently reset the period.
     """
     period = request.GET.get("period", "30d")
     if period not in PERIOD_DAYS:
         period = "30d"
-    ttype = request.GET.get("type", "all")
+    ttype = request.GET.get("txn_type", "all")
     if ttype not in dict(TYPE_FILTER_CHOICES):
         ttype = "all"
     days = PERIOD_DAYS[period]
@@ -127,10 +132,10 @@ def dashboard(request):
     """The expanded dashboard: KPIs, charts data, and a filterable history.
 
     One filter bar drives every KPI, every table and every chart: ``?period=``
-    picks the window and ``?type=`` narrows it to transfers or requests. The
-    transaction history at the foot of the page keeps its own ``status`` filter,
-    and reads the same ``type`` value the page-level bar sets -- the two share the
-    parameter name the history form has always posted.
+    picks the window and ``?txn_type=`` narrows it to transfers or requests. The
+    transaction history at the foot of the page keeps its own independent
+    ``?status=`` / ``?type=`` filters and carries the period forward in a hidden
+    input so submitting it does not reset the page-level window.
     """
     blocked = _kyc_required(request)
     if blocked:
