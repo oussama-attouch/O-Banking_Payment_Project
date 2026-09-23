@@ -965,3 +965,39 @@ class StatementsTests(TestCase):
         self.assertEqual({row[2] for row in rows[1:]}, {"in", "out"})
         self.assertEqual({row[4] for row in rows[1:]}, {"12.50", "7.25"})
         self.assertEqual({row[3] for row in rows[1:]}, {"Stmt_Bob Person"})
+
+    def test_csv_export_neutralises_formula_injection(self):
+        """A counterparty name is attacker-controlled; a formula must not run.
+
+        KYC.full_name is set by the other party, and the description is free
+        text, so either can begin with a spreadsheet formula trigger.
+        """
+        evil_name = '=HYPERLINK("http://evil","x")'
+        KYC.objects.filter(user=self.bob).update(full_name=evil_name)
+        self.make_txn(self.bob, self.alice, "5.00", description="+CMD|test")
+
+        # Companion: an ordinary name must come through untouched.
+        clean = self.make_user("stmt_carol")
+        KYC.objects.filter(user=clean).update(full_name="Alice Smith")
+        self.make_txn(clean, self.alice, "2.00")
+
+        body = self.client.get(reverse("account:statements_export")).content.decode("utf-8")
+
+        self.assertIn("'=HYPERLINK", body, "the name cell must be quoted for the spreadsheet")
+        self.assertIn("'+CMD|test", body, "the description cell must be quoted")
+        for line in body.splitlines():
+            self.assertFalse(line.startswith("=HYPERLINK"), line)
+            self.assertFalse(line.startswith("+CMD"), line)
+
+        rows = list(csv.reader(StringIO(body)))
+        counterparties = {row[3] for row in rows[1:]}
+        descriptions = {row[7] for row in rows[1:]}
+        self.assertIn("'" + evil_name, counterparties)
+        self.assertIn("'+CMD|test", descriptions)
+        self.assertIn("Alice Smith", counterparties)
+        self.assertNotIn("'Alice Smith", counterparties,
+                         "an ordinary name must not gain an apostrophe")
+        for row in rows[1:]:
+            for cell in (row[3], row[7]):
+                self.assertFalse(cell.startswith(("=", "+", "-", "@")),
+                                 "unescaped formula cell: %r" % cell)

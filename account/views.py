@@ -480,6 +480,26 @@ def statements_view(request):
     return render(request, "account/statements.html", context)
 
 
+def _csv_safe(value):
+    """Neutralise spreadsheet formula injection.
+
+    Prefix with a single quote when the value begins with ``=``, ``+``, ``-``,
+    ``@``, or a control character (tab / CR / LF). Standard OWASP fix; the cell
+    still reads exactly as stored in the browser, the quote is only visible to
+    the spreadsheet, which treats it as text.
+
+    Only the CSV writer needs this. The counterparty name comes from another
+    user's ``KYC.full_name``, so it is attacker-controlled; the HTML page is
+    left alone because a browser does not evaluate formulas.
+    """
+    if value is None:
+        return ""
+    s = str(value)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r", "\n"):
+        return "'" + s
+    return s
+
+
 @login_required
 def export_csv(request):
     """The same filtered statement as a CSV download.
@@ -528,11 +548,14 @@ def export_csv(request):
             when.isoformat(),
             txn.get_transaction_type_display(),
             _statement_direction(user, txn),
-            _statement_name(_statement_counterparty(user, txn)),
+            # The two free-text columns are the only ones another user can put
+            # arbitrary bytes into. Date, type, direction, amount, status and
+            # transaction_id are all generated here or by the model.
+            _csv_safe(_statement_name(_statement_counterparty(user, txn))),
             f"{txn.amount:.2f}",
             txn.get_status_display(),
             txn.transaction_id,
-            txn.description or "",
+            _csv_safe(txn.description or ""),
         ])
 
     return response
