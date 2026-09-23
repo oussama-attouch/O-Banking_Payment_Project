@@ -1380,6 +1380,24 @@ class NotificationTests(TestCase):
         self.assertEqual(rows.first().kind, Notification.KIND_REQUEST)
         self.assertEqual(rows.first().user_id, self.bob.pk)
 
+    def test_pending_request_notification_fires_on_transition(self):
+        """The live view creates the request as request_processing and only
+        later saves it as request_sent, so created is False on the transition
+        that matters."""
+        txn = self.make_txn("request_processing", ttype="request")
+        self.assertEqual(Notification.objects.count(), 0)
+
+        txn.status = "request_sent"
+        txn.save()
+
+        rows = Notification.objects.filter(kind=Notification.KIND_REQUEST)
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.first().user_id, self.bob.pk)
+
+        # Re-saving at the same status must not duplicate.
+        txn.save()
+        self.assertEqual(Notification.objects.count(), 1)
+
     # ------------------------------------------------------------------- helper
     def test_notify_helper_noop_for_none_user(self):
         from account.notifications import notify

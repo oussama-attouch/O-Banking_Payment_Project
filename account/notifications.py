@@ -3,7 +3,8 @@
 The signal observes core.Transaction without modifying it. Only one
 notification is created per state transition: a pre_save captures the
 previous status, and post_save compares and emits only when the status
-has changed into a settled state (completed or request_settled).
+has changed into a settled state (completed or request_settled), or into
+request_sent for a payment request.
 
 Registration: account/apps.py::AccountConfig.ready() imports this module for
 its side effects. INSTALLED_APPS lists 'account' (payment_prj/settings.py
@@ -105,21 +106,21 @@ def _create_notification_on_settle(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=Transaction)
 def _create_pending_notification(sender, instance, created, **kwargs):
-    """When a payment request is first sent to the other party,
-    notify them once.
+    """Notify the requester's counterparty once, when a payment
+    request first enters request_sent.
 
-    NOTE: this fires only when the row is INSERTed already in state
-    "request_sent". The live view (core/payment_request.py) inserts the
-    request as "request_processing" and flips it to "request_sent" on a
-    later save(), so created is False there and no row is written. The
-    settled-status path below is unaffected. See the Phase 5g-1 report.
+    The live view creates the row as request_processing and then
+    saves it again as request_sent, so the created flag is False on
+    the transition that matters. Rely on the pre_save captured
+    _previous_status instead, mirroring _create_notification_on_settle.
     """
-    if not created:
-        return
     if instance.transaction_type != "request":
         return
     if instance.status != "request_sent":
         return
+    previous = getattr(instance, "_previous_status", None)
+    if previous == "request_sent":
+        return  # already notified on an earlier save
     notify(
         instance.reciever,
         Notification.KIND_REQUEST,
