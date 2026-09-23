@@ -1,11 +1,15 @@
 /* O-Banking design layer.
-   Overrides Tabler's neutral palette with a fintech-appropriate one.
-   Loaded after tabler.min.css in both shells. Token-level only:
-   every rule below sets a CSS custom property that Tabler itself reads,
-   so every existing component inherits the change. No component styling,
-   no !important, no layout.
+   Overrides Tabler's neutral palette with an institutional indigo one.
+   Loaded after tabler.min.css in both shells.
 
-   Four deliberate departures from the first draft of this file, each
+   Phase 7a moved this file from token-only to token-first. The two palette
+   blocks still declare nothing but custom properties Tabler itself reads, so
+   every component inherits the change from a single place. A small, clearly
+   marked set of component-level refinements (KPI delta tokens, sidebar active
+   state, card / table / button / focus polish) follows below and at the end
+   of the file. Still no layout and no template change.
+
+   Five deliberate departures from the first draft of this file, each
    checked against the vendored tabler.min.css:
 
    1. --tblr-primary-lighter removed. Tabler 1.5.1 never defines it and
@@ -30,31 +34,31 @@
       Tabler's .card rule re-declares `--tblr-card-bg: var(--tblr-bg-surface)`
       on the element, which shadows the root-level --tblr-card-bg and sends
       dark cards to Tabler's --tblr-gray-800 (#1f2937) instead of the
-      intended #16161f. Verified in Chrome: before this, the dark card
-      computed to rgb(31, 41, 55); after, rgb(22, 22, 31).
+      intended #131b2e. Verified in Chrome: before this, the dark card
+      computed to rgb(31, 41, 55); after, rgb(19, 27, 46).
 */
 
 /* ===== LIGHT MODE ===== */
 :root,
 [data-bs-theme="light"] {
-  /* Accent: purple replaces Tabler's #206bc4 */
-  --tblr-primary: #6c47ff;
-  --tblr-primary-rgb: 108, 71, 255;
-  --tblr-primary-lt: rgba(108, 71, 255, 0.1);
-  --tblr-primary-darken: #5a38e8;
+  /* Accent: indigo replaces Tabler's #206bc4 */
+  --tblr-primary: #4f46e5;
+  --tblr-primary-rgb: 79, 70, 229;
+  --tblr-primary-lt: rgba(79, 70, 229, 0.10);
+  --tblr-primary-darken: #4338ca;
 
-  /* Body: lavender-tinted off-white, not clinical white */
-  --tblr-body-bg: #f7f6fb;
-  --tblr-body-color: #14141a;
+  /* Body: neutral off-white, not a tinted one */
+  --tblr-body-bg: #f8f9fa;
+  --tblr-body-color: #0f172a;
   --tblr-secondary-bg: #ffffff;
-  --tblr-secondary-color: #5a5a6e;
+  --tblr-secondary-color: #475569;
 
-  /* Cards: white with a subtle purple-tinted border */
+  /* Cards: white behind a solid neutral hairline */
   --tblr-card-bg: #ffffff;
-  --tblr-card-color: #14141a;
-  --tblr-card-border-color: rgba(108, 71, 255, 0.1);
-  --tblr-border-color: rgba(108, 71, 255, 0.1);
-  --tblr-border-color-translucent: rgba(108, 71, 255, 0.06);
+  --tblr-card-color: #0f172a;
+  --tblr-card-border-color: #e5e7eb;
+  --tblr-border-color: #e5e7eb;
+  --tblr-border-color-translucent: #f1f3f5;
 
   /* Tabler's .card rule re-declares `--tblr-card-bg: var(--tblr-bg-surface)`
      on the element itself, which shadows any root-level --tblr-card-bg. The
@@ -65,55 +69,86 @@
 
   /* Hover/focus rings pick up the accent automatically via --tblr-primary */
 
-  /* Table refinements */
+  /* Table refinements. The table border stays the lighter sibling of
+     --tblr-border-color, which is also Tabler's own default mapping
+     (--tblr-table-border-color: var(--tblr-border-color-translucent)). */
   --tblr-table-bg: transparent;
-  --tblr-table-color: #14141a;
-  --tblr-table-border-color: rgba(108, 71, 255, 0.08);
+  --tblr-table-color: #0f172a;
+  --tblr-table-border-color: #f1f3f5;
 }
 
 /* ===== DARK MODE ===== */
 [data-bs-theme="dark"] {
-  /* Accent: slightly lighter for contrast on dark bg */
-  --tblr-primary: #8b6bff;
-  --tblr-primary-rgb: 139, 107, 255;
-  --tblr-primary-lt: rgba(139, 107, 255, 0.15);
-  --tblr-primary-darken: #6c47ff;
+  /* Accent: lifted one step so it keeps contrast on a dark surface */
+  --tblr-primary: #6366f1;
+  --tblr-primary-rgb: 99, 102, 241;
+  --tblr-primary-lt: rgba(99, 102, 241, 0.14);
+  --tblr-primary-darken: #4f46e5;
 
-  /* Body: deep near-black with a purple undertone, not Tabler's #111827 */
-  --tblr-body-bg: #0a0a10;
-  --tblr-body-color: #e8e8ed;
-  --tblr-secondary-bg: #16161f;
-  --tblr-secondary-color: #9a9aab;
+  /* Body: deep navy-charcoal, not Tabler's #111827 and not pitch black */
+  --tblr-body-bg: #0b0f19;
+  --tblr-body-color: #f8fafc;
+  --tblr-secondary-bg: #131b2e;
+  --tblr-secondary-color: #94a3b8;
 
   /* Cards: elevated dark, distinct from body */
-  --tblr-card-bg: #16161f;
-  --tblr-card-color: #e8e8ed;
-  --tblr-card-border-color: rgba(255, 255, 255, 0.06);
-  --tblr-border-color: rgba(255, 255, 255, 0.06);
-  --tblr-border-color-translucent: rgba(255, 255, 255, 0.04);
+  --tblr-card-bg: #131b2e;
+  --tblr-card-color: #f8fafc;
+  --tblr-card-border-color: #1f293d;
+  --tblr-border-color: #1f293d;
+  --tblr-border-color-translucent: #172033;
 
   /* See the light block: .card reads --tblr-bg-surface, not --tblr-card-bg.
      Without this, dark cards fall back to Tabler's --tblr-gray-800 (#1f2937). */
-  --tblr-bg-surface: #16161f;
+  --tblr-bg-surface: #131b2e;
 
   /* Table in dark */
   --tblr-table-bg: transparent;
-  --tblr-table-color: #e8e8ed;
-  --tblr-table-border-color: rgba(255, 255, 255, 0.05);
+  --tblr-table-color: #f8fafc;
+  --tblr-table-border-color: #172033;
 }
 
-/* ===== DASHBOARD SIDEBAR -- distinct surface in both modes ===== */
+/* ===== KPI DELTA TOKENS -- override, not a redefinition ===== */
+/* --ob-delta-positive / --ob-delta-negative are declared in the inline :root
+   block of both shells, and those blocks are emitted in <head> AFTER this
+   stylesheet's <link>. A plain :root declaration here would therefore lose the
+   cascade tie on document order and change nothing. `html[data-bs-theme]` is
+   one step more specific (0,1,1 vs :root's 0,1,0) and matches the attribute
+   both shells set on <html>, so the retune below actually lands in both modes.
+   The shells themselves are untouched and stay byte-identical to each other. */
+html[data-bs-theme] {
+  --ob-delta-positive: #059669;
+  --ob-delta-negative: #dc2626;
+}
+
+/* ===== DASHBOARD SIDEBAR -- neutral surface in both modes ===== */
 /* The vertical navbar takes its fill from --tblr-navbar-bg and its edge
    from --tblr-navbar-border-color (via an inset box-shadow). Scoped to
    the vertical variant so the marketing pages' horizontal navbar keeps
-   Tabler's own surface. */
+   Tabler's own surface. Departure 4 in the header explains why the
+   background-color / border-right-color form would be inert. */
 [data-bs-theme="light"] .navbar-vertical {
-  --tblr-navbar-bg: #f0eef8;
-  --tblr-navbar-border-color: rgba(108, 71, 255, 0.1);
+  --tblr-navbar-bg: #ffffff;
+  --tblr-navbar-border-color: #e5e7eb;
 }
 [data-bs-theme="dark"] .navbar-vertical {
-  --tblr-navbar-bg: #08080c;
-  --tblr-navbar-border-color: rgba(255, 255, 255, 0.04);
+  --tblr-navbar-bg: #0d1322;
+  --tblr-navbar-border-color: #1f293d;
+}
+
+/* ===== SIDEBAR ACTIVE STATE -- left accent bar ===== */
+/* The transparent border reserves the 3px on every item, so activating a
+   link marks it in place instead of shifting the label sideways. */
+.navbar-vertical .nav-item .nav-link {
+  border-left: 3px solid transparent;
+  border-radius: 0 6px 6px 0;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.navbar-vertical .nav-item .nav-link.active {
+  border-left-color: var(--tblr-primary);
+  background-color: var(--tblr-primary-lt);
+  color: var(--tblr-primary);
+  font-weight: 600;
 }
 
 /* ===== SUBTLE REFINEMENTS ===== */
@@ -129,4 +164,52 @@
   height: 48px;
   color: var(--ob-sparkline-stroke);
   display: block;
+}
+
+/* ===== MICRO-INTERACTIONS ===== */
+
+/* Card hover — subtle elevation, no layout shift */
+.card {
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.05);
+}
+[data-bs-theme="dark"] .card:hover {
+  border-color: #334155;
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.4);
+}
+
+/* Table row hover — warmer than Bootstrap default */
+.table-hover > tbody > tr {
+  transition: background-color 100ms ease;
+}
+.table-hover > tbody > tr:hover > * {
+  background-color: #f1f5f9;
+}
+[data-bs-theme="dark"] .table-hover > tbody > tr:hover > * {
+  background-color: #1e293b;
+}
+
+/* Button press tactility */
+.btn {
+  transition: background-color 120ms ease, border-color 120ms ease,
+              transform 80ms ease;
+}
+.btn:active {
+  transform: scale(0.985);
+}
+
+/* Focus ring: brand-tinted, no default halo */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+.form-select:focus-visible,
+.form-control:focus-visible {
+  outline: 2px solid var(--tblr-primary) !important;
+  outline-offset: 2px !important;
+  box-shadow: none !important;
 }
