@@ -12,6 +12,12 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from account import analytics
+from account.analytics import (
+    PERIOD_CHOICES,
+    PERIOD_DAYS,
+    PERIOD_SHORT,
+    TYPE_FILTER_CHOICES,
+)
 from account.models import (
     KYC,
     Account,
@@ -50,15 +56,90 @@ def _kyc_required(request):
     return None
 
 
+def _dashboard_filters(request):
+    """Return ``(period_key, type_key, days, txn_type)`` for the dashboard.
+
+    Both values come straight off the query string, so both are validated
+    against the choice tables before use; anything unrecognised falls back to the
+    default rather than reaching a queryset.
+    """
+    period = request.GET.get("period", "30d")
+    if period not in PERIOD_DAYS:
+        period = "30d"
+    ttype = request.GET.get("type", "all")
+    if ttype not in dict(TYPE_FILTER_CHOICES):
+        ttype = "all"
+    days = PERIOD_DAYS[period]
+    txn_type = None if ttype == "all" else ttype
+    return period, ttype, days, txn_type
+
+
+#: Window sizes the period filter maps onto the two time-series charts.
+#: ``weeks`` is derived from ``days`` for the fixed periods; "all time" uses the
+#: same 2 year cap ``analytics.get_daily_net_flow`` applies to its own buckets.
+ALL_TIME_WEEKS = 104
+
+
+def _dashboard_period_windows(days):
+    """``(flow_days, weeks)`` -- the chart windows implied by a period."""
+    flow_days = days if days is not None else analytics.MAX_FLOW_DAYS
+    weeks = ALL_TIME_WEEKS if days is None else max(2, days // 7)
+    return flow_days, weeks
+
+
+#: Every figure the dashboard and its JSON twin share for one request.
+#: ``account`` is passed in rather than looked up again, so neither view costs an
+#: extra query for it.
+def _dashboard_analytics(request, account, days, txn_type):
+    """Run every dashboard helper under the validated filters."""
+    flow_days, weeks = _dashboard_period_windows(days)
+
+    return {
+        "kpis": analytics.get_kpis(
+            request.user, days=days, account=account, transaction_type=txn_type
+        ),
+        "kpi_deltas": analytics.get_kpi_deltas(
+            request.user, days=days, transaction_type=txn_type
+        ),
+        "daily_flow": analytics.get_daily_net_flow(
+            request.user, days=flow_days, transaction_type=txn_type
+        ),
+        "weekly_volume": analytics.get_weekly_volume(
+            request.user, weeks=weeks, transaction_type=txn_type
+        ),
+        "status_breakdown": analytics.get_status_breakdown(
+            request.user, transaction_type=txn_type
+        ),
+        "recent_transactions": analytics.get_recent_transactions(
+            request.user, limit=8, transaction_type=txn_type
+        ),
+        "top_counterparties": analytics.get_top_counterparties(
+            request.user, limit=5, transaction_type=txn_type
+        ),
+        "kyc_status": analytics.get_kyc_status(
+            request.user, account=account, has_kyc=True
+        ),
+    }
+
+
 @login_required
 def dashboard(request):
-    """The expanded dashboard: KPIs, charts data, and a filterable history."""
+    """The expanded dashboard: KPIs, charts data, and a filterable history.
+
+    One filter bar drives every KPI, every table and every chart: ``?period=``
+    picks the window and ``?type=`` narrows it to transfers or requests. The
+    transaction history at the foot of the page keeps its own ``status`` filter,
+    and reads the same ``type`` value the page-level bar sets -- the two share the
+    parameter name the history form has always posted.
+    """
     blocked = _kyc_required(request)
     if blocked:
         return blocked
 
     kyc = KYC.objects.get(user=request.user)
     account = Account.objects.get(user=request.user)
+
+    period, ttype, days, txn_type = _dashboard_filters(request)
 
     history_status = (request.GET.get("status") or "").strip()
     history_type = (request.GET.get("type") or "").strip()
@@ -70,14 +151,7 @@ def dashboard(request):
     context = {
         "kyc": kyc,
         "account": account,
-        "kpis": analytics.get_kpis(request.user, account=account),
-        "kpi_deltas": analytics.get_kpi_deltas(request.user),
-        "daily_flow_90d": analytics.get_daily_net_flow(request.user),
-        "weekly_volume_12w": analytics.get_weekly_volume(request.user),
-        "status_breakdown": analytics.get_status_breakdown(request.user),
-        "recent_transactions": analytics.get_recent_transactions(request.user),
-        "top_counterparties": analytics.get_top_counterparties(request.user),
-        "kyc_status": analytics.get_kyc_status(request.user, account=account, has_kyc=True),
+        **_dashboard_analytics(request, account, days, txn_type),
         "transaction_history": analytics.get_transaction_history(
             request.user,
             status=history_status or None,
@@ -88,6 +162,18 @@ def dashboard(request):
         "history_type": history_type,
         "history_choices": analytics.STATUS_CHOICES,
         "history_type_choices": analytics.TYPE_CHOICES,
+        # The page-level filter, echoed back so the bar and the labels agree with
+        # the figures actually rendered.
+        "active_period": period,
+        "active_period_label": dict(PERIOD_CHOICES)[period],
+        "active_period_short": PERIOD_SHORT[period],
+        "active_type": ttype,
+        "active_type_label": dict(TYPE_FILTER_CHOICES)[ttype],
+        "period_choices": PERIOD_CHOICES,
+        "type_choices": TYPE_FILTER_CHOICES,
+        # "All time" has no window before it, so the delta labels have nothing
+        # to compare against and the template says so.
+        "compare_label": None if days is None else dict(PERIOD_CHOICES)[period],
     }
     return render(request, "account/dashboard.html", context)
 
@@ -109,21 +195,28 @@ def dashboard_data(request):
 
     Only aggregates are returned -- no model rows -- so the payload stays small
     and nothing here can leak another user's transaction detail.
+
+    Reads the same ``?period=`` / ``?type=`` pair as the HTML dashboard through
+    the same validator, so the two can never disagree about the window. The
+    serialization shape is unchanged.
     """
     blocked = _kyc_required(request)
     if blocked:
         return blocked
 
     account = Account.objects.get(user=request.user)
+    # period/ttype only name the selection; the helpers take days/txn_type.
+    _period, _ttype, days, txn_type = _dashboard_filters(request)
+    figures = _dashboard_analytics(request, account, days, txn_type)
 
     payload = {
         "generated_at": timezone.now().isoformat(),
-        "kpis": _json_ready(analytics.get_kpis(request.user, account=account)),
-        "daily_flow_90d": _json_ready(analytics.get_daily_net_flow(request.user)),
-        "weekly_volume_12w": _json_ready(analytics.get_weekly_volume(request.user)),
-        "status_breakdown": analytics.get_status_breakdown(request.user),
-        "top_counterparties": _json_ready(analytics.get_top_counterparties(request.user)),
-        "kyc_status": analytics.get_kyc_status(request.user, account=account, has_kyc=True),
+        "kpis": _json_ready(figures["kpis"]),
+        "daily_flow": _json_ready(figures["daily_flow"]),
+        "weekly_volume": _json_ready(figures["weekly_volume"]),
+        "status_breakdown": figures["status_breakdown"],
+        "top_counterparties": _json_ready(figures["top_counterparties"]),
+        "kyc_status": figures["kyc_status"],
     }
     return JsonResponse(payload)
 

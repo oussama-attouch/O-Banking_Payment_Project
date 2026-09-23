@@ -6,6 +6,34 @@
 
 {% block content %}
 
+<!-- ==================== Row 0: page-level filter bar =================== -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
+            <div class="text-secondary small">
+                Showing: <span class="fw-medium text-body">{{ active_period_label }}</span>
+                {% if active_type != "all" %}
+                &middot; <span class="fw-medium text-body">{{ active_type_label }}</span>
+                {% endif %}
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <div class="btn-group" role="group" aria-label="Period filter">
+                    {% for key, label in period_choices %}
+                    <a href="?period={{ key }}&type={{ active_type }}"
+                       class="btn btn-sm {% if active_period == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ label }}</a>
+                    {% endfor %}
+                </div>
+                <div class="btn-group" role="group" aria-label="Type filter">
+                    {% for key, label in type_choices %}
+                    <a href="?period={{ active_period }}&type={{ key }}"
+                       class="btn btn-sm {% if active_type == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">{{ label }}</a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ======================= Row 1: balance hero ========================= -->
 <div class="row mb-3">
     <div class="col-12">
@@ -19,7 +47,7 @@
 {% if delta.delta_pct is not None %}
                         <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
                             {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
-                            {{ delta.delta_pct }}% vs 30 days ago
+                            {{ delta.delta_pct }}% {% if compare_label %}vs previous {{ compare_label }}{% else %}No comparison &mdash; full history{% endif %}
                         </span>
 {% else %}
                         <span class="text-secondary small">No comparison yet</span>
@@ -60,7 +88,7 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="text-secondary small">Received (30d)</div>
+                    <div class="text-secondary small">Received ({{ active_period_short }})</div>
                     <i class="ti ti-arrow-down-left text-secondary"></i>
                 </div>
                 <div class="d-flex align-items-end justify-content-between">
@@ -95,7 +123,7 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="text-secondary small">Sent (30d)</div>
+                    <div class="text-secondary small">Sent ({{ active_period_short }})</div>
                     <i class="ti ti-arrow-up-right text-secondary"></i>
                 </div>
                 <div class="d-flex align-items-end justify-content-between">
@@ -130,7 +158,7 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="text-secondary small">Net flow (30d)</div>
+                    <div class="text-secondary small">Net flow ({{ active_period_short }})</div>
                     <i class="ti ti-chart-line text-secondary"></i>
                 </div>
                 <div class="d-flex align-items-end justify-content-between">
@@ -200,7 +228,7 @@
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="text-secondary small">Transactions (30d)</div>
+                    <div class="text-secondary small">Transactions ({{ active_period_short }})</div>
                     <i class="ti ti-list-details text-secondary"></i>
                 </div>
                 <div class="d-flex align-items-end justify-content-between">
@@ -305,18 +333,14 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Daily net flow</h3>
-                <div class="ms-auto btn-group" role="group" aria-label="Range">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-range="7">7D</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary active" data-range="30">30D</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-range="90">90D</button>
-                </div>
+                <div class="text-secondary small ms-auto">{{ active_period_label }}</div>
                 <button type="button" class="btn btn-ghost-secondary btn-icon btn-sm ms-2"
                         data-chart-export="chart-flow" aria-label="Download chart">
                     <i class="ti ti-download"></i>
                 </button>
             </div>
             <div class="card-body">
-                <canvas id="chart-flow" style="height: 16rem;"></canvas>
+                <canvas id="chart-flow" data-flow-days="{{ daily_flow|length }}" style="height: 16rem;"></canvas>
             </div>
         </div>
     </div>
@@ -355,7 +379,7 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Balance trajectory</h3>
-                <div class="text-secondary small ms-auto">Last 90 days</div>
+                <div class="text-secondary small ms-auto">{{ active_period_label }}</div>
                 <button type="button" class="btn btn-ghost-secondary btn-icon btn-sm ms-2"
                         data-chart-export="chart-balance" aria-label="Download chart">
                     <i class="ti ti-download"></i>
@@ -607,8 +631,8 @@
 </div>
 
 <!-- ========================== data for the charts ====================== -->
-{{ daily_flow_90d|json_script:"data-flow" }}
-{{ weekly_volume_12w|json_script:"data-weekly" }}
+{{ daily_flow|json_script:"data-flow" }}
+{{ weekly_volume|json_script:"data-weekly" }}
 {{ status_breakdown|json_script:"data-status" }}
 {{ history_choices|json_script:"data-status-labels" }}
 {{ kpis|json_script:"data-kpis" }}
@@ -707,9 +731,10 @@
         var statusKeys = choicePairs.map(function (pair) { return pair[0]; });
         var statusLabels = choicePairs.map(function (pair) { return prettyLabel(pair[1]); });
 
-        /* Empty state decided here rather than server-side: kpis.transaction_count
-           is windowed to 30 days while the charts show 90 days / 12 weeks / all
-           time, so the two can legitimately disagree. */
+        /* Empty state decided here rather than server-side: the KPI window and
+           the chart windows are now driven by the same page-level period, so
+           they agree -- but a period can still be too short to contain any
+           completed movement while the "all time" status breakdown is non-empty. */
         var hasFlow = flow.some(function (d) { return num(d.received) || num(d.sent); });
         var hasWeekly = weekly.some(function (d) { return num(d.received) || num(d.sent); });
         var hasStatus = Object.keys(statusCounts).some(function (k) { return statusCounts[k] > 0; });
@@ -721,7 +746,12 @@
         }
 
         var charts = {};
-        var currentRange = 30;
+
+        /* The period filter decides the window server-side, so the flow chart
+           always plots the whole payload it was given. Past ~90 daily labels the
+           axis becomes unreadable, so the ticks are dropped. */
+        var flowCanvas = document.getElementById("chart-flow");
+        var flowDays = flowCanvas ? Number(flowCanvas.getAttribute("data-flow-days")) : 0;
 
         function palette() {
             return [
@@ -742,19 +772,6 @@
             return gradient;
         }
 
-        function renderFlow(days) {
-            var chart = charts["chart-flow"];
-            if (!chart) { return; }
-            var slice = flow.slice(-days);
-            chart.data.labels = slice.map(function (d) { return d.date; });
-            chart.data.datasets[0].data = slice.map(function (d) { return num(d.received); });
-            chart.data.datasets[1].data = slice.map(function (d) { return num(d.sent); });
-            chart.data.datasets[2].data = slice.map(function (d) { return num(d.net); });
-            /* 90 date labels are too dense to read. */
-            chart.options.scales.x.ticks.display = days < 90;
-            chart.update();
-        }
-
         function initCharts() {
             var ACCENT = cssVar("--tblr-primary");
             var GREEN = cssVar("--tblr-green");
@@ -767,11 +784,11 @@
             charts["chart-flow"] = new Chart(document.getElementById("chart-flow"), {
                 type: "line",
                 data: {
-                    labels: [],
+                    labels: flow.map(function (d) { return d.date; }),
                     datasets: [
-                        { label: "Received", data: [], borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2 },
-                        { label: "Sent", data: [], borderColor: RED, backgroundColor: RED, borderWidth: 2 },
-                        { label: "Net", data: [], borderColor: ACCENT, borderDash: [4, 4], borderWidth: 1 }
+                        { label: "Received", data: flow.map(function (d) { return num(d.received); }), borderColor: GREEN, backgroundColor: GREEN, borderWidth: 2 },
+                        { label: "Sent", data: flow.map(function (d) { return num(d.sent); }), borderColor: RED, backgroundColor: RED, borderWidth: 2 },
+                        { label: "Net", data: flow.map(function (d) { return num(d.net); }), borderColor: ACCENT, borderDash: [4, 4], borderWidth: 1 }
                     ]
                 },
                 options: {
@@ -795,7 +812,7 @@
                     },
                     scales: {
                         x: {
-                            ticks: { display: true, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
+                            ticks: { display: flowDays < 90, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 },
                             grid: { display: false },
                             border: { display: false }
                         },
@@ -921,52 +938,7 @@
             });
         }
 
-        /* The chosen range survives a reload. localStorage can throw (private
-           modes), so both accessors are guarded. */
-        var RANGE_KEY = "ob-flow-range";
-
-        function readStoredRange() {
-            try {
-                return localStorage.getItem(RANGE_KEY);
-            } catch (e) {
-                return null;
-            }
-        }
-
-        function storeRange(value) {
-            try {
-                localStorage.setItem(RANGE_KEY, String(value));
-            } catch (e) { /* storage unavailable -- the choice is simply not kept */ }
-        }
-
-        var rangeButtons = document.querySelectorAll("[data-range]");
-
-        function activateRange(days) {
-            currentRange = days;
-            Array.prototype.forEach.call(rangeButtons, function (button) {
-                button.classList.toggle(
-                    "active", Number(button.getAttribute("data-range")) === days
-                );
-            });
-            renderFlow(days);
-        }
-
-        /* Restore the stored choice before the user interacts with the selector. */
-        var storedRange = Number(readStoredRange());
-        if (storedRange === 7 || storedRange === 30 || storedRange === 90) {
-            currentRange = storedRange;
-        }
-
         initCharts();
-        activateRange(currentRange);
-
-        Array.prototype.forEach.call(rangeButtons, function (button) {
-            button.addEventListener("click", function () {
-                var days = Number(button.getAttribute("data-range"));
-                activateRange(days);
-                storeRange(days);
-            });
-        });
 
         /* One delegated handler covers the download buttons on all four cards,
            including charts rebuilt after a theme change. */
@@ -988,7 +960,6 @@
             Object.keys(charts).forEach(function (key) { charts[key].destroy(); });
             charts = {};
             initCharts();
-            renderFlow(currentRange);
         });
     })();
 </script>

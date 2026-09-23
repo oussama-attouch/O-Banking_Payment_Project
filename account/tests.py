@@ -416,8 +416,10 @@ class DashboardAnalyticsTests(DashboardAnalyticsTestBase):
         # The 2a-dash-1 stub renders no figures, so the balance is asserted on
         # the context the view supplies rather than on the response body.
         self.assertEqual(response.context["kpis"]["balance"], Decimal("1000.00"))
-        self.assertEqual(len(response.context["daily_flow_90d"]), 90)
-        self.assertEqual(len(response.context["weekly_volume_12w"]), 12)
+        # Phase 7c renamed these payloads and made their length follow the
+        # period filter, which defaults to 30d.
+        self.assertEqual(len(response.context["daily_flow"]), 30)
+        self.assertEqual(len(response.context["weekly_volume"]), 4)
         self.assertEqual(response.context["history_status"], "")
         self.assertEqual(response.context["history_type"], "")
 
@@ -428,7 +430,7 @@ class DashboardAnalyticsTests(DashboardAnalyticsTestBase):
         self.assertEqual(response["Content-Type"], "application/json")
 
         payload = response.json()
-        for key in ("generated_at", "kpis", "daily_flow_90d", "weekly_volume_12w",
+        for key in ("generated_at", "kpis", "daily_flow", "weekly_volume",
                     "status_breakdown", "top_counterparties", "kyc_status"):
             with self.subTest(key=key):
                 self.assertIn(key, payload)
@@ -438,9 +440,9 @@ class DashboardAnalyticsTests(DashboardAnalyticsTestBase):
         self.assertEqual(payload["kpis"]["received"], "12.34")
         self.assertIsInstance(payload["kpis"]["received"], str)
         self.assertIsInstance(payload["kpis"]["pending_count"], int)
-        self.assertIsInstance(payload["daily_flow_90d"], list)
-        self.assertEqual(len(payload["daily_flow_90d"]), 90)
-        self.assertIsInstance(payload["daily_flow_90d"][0]["net"], str)
+        self.assertIsInstance(payload["daily_flow"], list)
+        self.assertEqual(len(payload["daily_flow"]), 30)
+        self.assertIsInstance(payload["daily_flow"][0]["net"], str)
 
     def test_dashboard_data_requires_kyc(self):
         no_kyc = User.objects.create_user(
@@ -489,6 +491,147 @@ class DashboardAnalyticsTests(DashboardAnalyticsTestBase):
                     len(captured), expected,
                     "%s used %d queries, expected %d" % (name, len(captured), expected),
                 )
+
+
+# =====================================================================
+# Phase 7c  one filter bar drives every KPI and every chart
+# =====================================================================
+class FilterTests(DashboardAnalyticsTestBase):
+    """``?period=`` and ``?type=`` on the dashboard and its JSON twin.
+
+    alice is the logged-in owner (see the base fixture). The seed below gives her
+    one transfer in and one transfer out, a settled request she raised, and a
+    failed transfer, so every filter has something to include and something to
+    exclude. Amounts are distinct so a wrong filter shows up as a wrong total.
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        # Transfer in: alice received 100.
+        self.make_txn(self.bob, self.alice, "100.00")
+        # Transfer out: alice sent 40.
+        self.make_txn(self.alice, self.bob, "40.00")
+        # Request alice raised and bob settled: money IN for alice (direction rule).
+        self.make_txn(self.alice, self.bob, "25.00", status="request_settled",
+                      ttype="request")
+        # A request that never completed: excluded from every flow figure.
+        self.make_txn(self.alice, self.bob, "999.00", status="request_sent",
+                      ttype="request")
+        # A failed transfer: counted by neither filter's completed totals.
+        self.make_txn(self.alice, self.bob, "777.00", status="failed")
+
+    # --------------------------------------------------------------- period
+    def test_dashboard_default_period_is_30d(self):
+        response = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["active_period"], "30d")
+        self.assertEqual(response.context["active_period_short"], "30d")
+        self.assertEqual(response.context["compare_label"], "30 days")
+
+    def test_dashboard_7d_period(self):
+        response = self.client.get(reverse("account:dashboard"), {"period": "7d"})
+        self.assertEqual(response.context["active_period"], "7d")
+        self.assertEqual(response.context["active_period_short"], "7d")
+        self.assertEqual(response.context["active_period_label"], "7 days")
+        # The window really is 7 days, in both time series.
+        self.assertEqual(len(response.context["daily_flow"]), 7)
+        self.assertEqual(len(response.context["weekly_volume"]), 2)
+
+    def test_dashboard_invalid_period_falls_back(self):
+        response = self.client.get(reverse("account:dashboard"), {"period": "garbage"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["active_period"], "30d")
+        self.assertEqual(len(response.context["daily_flow"]), 30)
+
+    # ----------------------------------------------------------------- type
+    def test_dashboard_type_filter_transfers(self):
+        response = self.client.get(reverse("account:dashboard"), {"type": "transfer"})
+        self.assertEqual(response.context["active_type"], "transfer")
+        self.assertEqual(response.context["active_type_label"], "Transfers")
+
+        kpis = response.context["kpis"]
+        # 100 in and 40 out are both transfers; the settled request (25) is not.
+        self.assertEqual(kpis["received"], Decimal("100.00"))
+        self.assertEqual(kpis["sent"], Decimal("40.00"))
+        self.assertEqual(response.context["kpis"]["transaction_count"], 3)
+        # Every recent row is a transfer, and the request rows are gone.
+        types = {t.transaction_type for t in response.context["recent_transactions"]}
+        self.assertEqual(types, {"transfer"})
+
+    def test_dashboard_invalid_type_falls_back(self):
+        response = self.client.get(reverse("account:dashboard"), {"type": "garbage"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["active_type"], "all")
+        self.assertEqual(response.context["active_type_label"], "All types")
+
+    def test_dashboard_combined_filters(self):
+        response = self.client.get(
+            reverse("account:dashboard"), {"period": "7d", "type": "transfer"}
+        )
+        self.assertEqual(response.context["active_period"], "7d")
+        self.assertEqual(response.context["active_type"], "transfer")
+        self.assertEqual(len(response.context["daily_flow"]), 7)
+        kpis = response.context["kpis"]
+        self.assertEqual(kpis["received"], Decimal("100.00"),
+                         "the settled request must be excluded by ?type=transfer")
+        self.assertEqual(kpis["transaction_count"], 3)
+
+    # --------------------------------------------------------------- labels
+    def test_dashboard_kpi_label_uses_period(self):
+        response = self.client.get(reverse("account:dashboard"), {"period": "90d"})
+        body = response.content.decode()
+        self.assertIn("Received (90d)", body)
+        self.assertIn("Net flow (90d)", body)
+        self.assertNotIn("Received (30d)", body)
+        # The filter bar reports the same window the labels do.
+        self.assertIn("Showing:", body)
+        self.assertIn("90 days", body)
+
+    def test_dashboard_all_period_has_no_comparison(self):
+        response = self.client.get(reverse("account:dashboard"), {"period": "all"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["active_period"], "all")
+        self.assertIsNone(
+            response.context["compare_label"],
+            "all time has no window before it to compare against",
+        )
+        for key, entry in response.context["kpi_deltas"].items():
+            with self.subTest(kpi=key):
+                self.assertIsNone(entry["delta_pct"])
+        body = response.content.decode()
+        self.assertIn("No comparison", body)
+        # "All time" is capped rather than unbounded.
+        self.assertLessEqual(len(response.context["daily_flow"]), 730)
+        self.assertEqual(len(response.context["weekly_volume"]), 104)
+
+    # ------------------------------------------------------------- JSON twin
+    def test_dashboard_data_endpoint_respects_filters(self):
+        response = self.client.get(
+            reverse("account:dashboard-data"), {"period": "7d", "type": "transfer"}
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        for key in ("generated_at", "kpis", "daily_flow", "weekly_volume",
+                    "status_breakdown", "top_counterparties", "kyc_status"):
+            with self.subTest(key=key):
+                self.assertIn(key, payload)
+
+        # Same shape as before the filters existed...
+        self.assertIsInstance(payload["daily_flow"], list)
+        self.assertIsInstance(payload["weekly_volume"], list)
+        self.assertIsInstance(payload["daily_flow"][0]["net"], str)
+        # ...and the filters actually reached the helpers.
+        self.assertEqual(len(payload["daily_flow"]), 7)
+        self.assertEqual(payload["kpis"]["received"], "100.00")
+        self.assertEqual(payload["kpis"]["sent"], "40.00")
+
+        # An invalid pair falls back to the documented defaults, not to an error.
+        fallback = self.client.get(
+            reverse("account:dashboard-data"), {"period": "x", "type": "y"}
+        ).json()
+        self.assertEqual(len(fallback["daily_flow"]), 30)
 
 
 # =====================================================================

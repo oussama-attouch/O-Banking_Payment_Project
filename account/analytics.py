@@ -61,9 +61,42 @@ PENDING_STATUSES = ("processing", "request_sent", "request_processing")
 #: referred to ``Transaction.STATUS_CHOICES`` and
 #: ``Transaction.TRANSACTION_TYPE``; neither attribute exists.
 STATUS_CHOICES = tuple(Transaction._meta.get_field("status").choices)
+#: ``transaction_type`` metadata from the model. The dashboard's page-level type
+#: filter has its own list below, so this one keeps the model's pair shape and
+#: is what :data:`TYPE_KEYS` and the transaction-history form consume.
 TYPE_CHOICES = tuple(Transaction._meta.get_field("transaction_type").choices)
 STATUS_KEYS = tuple(key for key, _ in STATUS_CHOICES)
 TYPE_KEYS = tuple(key for key, _ in TYPE_CHOICES)
+
+#: Dashboard period keys, widest window last. ``all`` is the only one whose
+#: :data:`PERIOD_DAYS` entry is ``None``, which every helper reads as "no lower
+#: bound" rather than as a number of days.
+PERIOD_CHOICES = [
+    ("7d", "7 days"),
+    ("30d", "30 days"),
+    ("90d", "90 days"),
+    ("1y", "1 year"),
+    ("all", "All time"),
+]
+PERIOD_DAYS = {"7d": 7, "30d": 30, "90d": 90, "1y": 365, "all": None}
+PERIOD_SHORT = {"7d": "7d", "30d": "30d", "90d": "90d", "1y": "1y", "all": "all"}
+
+#: Type filter for the dashboard panel: the two real ``transaction_type`` values
+#: plus an ``all`` pseudo-type. The selection reaches the helpers as
+#: ``transaction_type=None`` for "all", so no ``Q`` is added at all.
+TYPE_FILTER_CHOICES = [
+    ("all", "All types"),
+    ("transfer", "Transfers"),
+    ("request", "Requests"),
+]
+
+#: Days of history the "all time" window may cover. Caps the number of buckets a
+#: hand-edited query string can ask the server to build.
+MAX_FLOW_DAYS = 730
+
+#: Sparkline points are capped regardless of how wide the KPI window is: a 365
+#: day period must not try to plot 365 points into a 60x20 box.
+MAX_SPARKLINE_DAYS = 30
 
 
 # --------------------------------------------------------------------- helpers
@@ -119,10 +152,25 @@ def _counterparty_of(user, transaction):
 
 
 def _window(days):
-    """``Q`` limiting a queryset to the trailing window, or an empty ``Q``."""
+    """``Q`` limiting a queryset to the trailing window, or an empty ``Q``.
+
+    ``days=None`` means "all time" and is *not* an error: an empty ``Q`` adds no
+    ``WHERE`` term at all, so the caller sees the whole history.
+    """
     if days is None:
         return Q()
     return Q(date__gte=timezone.now() - timedelta(days=days))
+
+
+def _type_q(transaction_type):
+    """``Q`` narrowing a queryset to one ``transaction_type``.
+
+    ``None`` (the "all types" selection) yields an empty ``Q``, so the caller's
+    SQL is byte-for-byte what it was before the filter existed.
+    """
+    if transaction_type is None:
+        return Q()
+    return Q(transaction_type=transaction_type)
 
 
 # ------------------------------------------------------------------- public API
@@ -134,18 +182,24 @@ def get_balance(account):
     return _money(account.account_balance)
 
 
-def get_kpis(user, days=30, account=None):
+def get_kpis(user, days=30, account=None, transaction_type=None):
     """The dashboard's headline figures.
 
     ``days`` scopes every flow metric to the trailing window; pass ``None`` for
-    all time. ``balance`` is always point-in-time.
+    all time. ``transaction_type`` narrows the same window to ``transfer`` or
+    ``request``; ``None`` means both, and adds nothing to the query. ``balance``
+    is always point-in-time and never filtered.
 
     Query count: **2** when ``account`` is supplied, **3** otherwise.
     """
     if account is None:
         account = Account.objects.filter(user=user).first()
 
-    scope = Transaction.objects.filter(_party_q(user)).filter(_window(days))
+    scope = (
+        Transaction.objects.filter(_party_q(user))
+        .filter(_window(days))
+        .filter(_type_q(transaction_type))
+    )
     completed = Q(status__in=COMPLETED_STATUSES)
 
     totals = scope.aggregate(
@@ -183,21 +237,35 @@ def get_kpis(user, days=30, account=None):
     }
 
 
-def get_daily_net_flow(user, days=90):
+def get_daily_net_flow(user, days=90, transaction_type=None):
     """One bucket per day, oldest first, zero-filled.
+
+    ``days`` is the trailing window. ``days=None`` means "all time", bounded by
+    :data:`MAX_FLOW_DAYS`: the bucket range starts at the user's earliest party
+    transaction, or 730 days ago, whichever is later. Because that span is read
+    off the earliest bucket of the *same* query, the "all time" path costs no
+    extra round trip -- and when the caller passes an explicit ``days`` the
+    earliest bucket is never even inspected.
+
+    ``transaction_type`` narrows to ``transfer`` or ``request``; ``None`` adds
+    nothing to the query.
 
     Query count: **1**.
     """
     today = timezone.localdate()
-    start = today - timedelta(days=days - 1)
+
+    queryset = (
+        Transaction.objects.filter(_party_q(user), status__in=COMPLETED_STATUSES)
+        .filter(_type_q(transaction_type))
+    )
+    if days is not None:
+        # An explicit span needs no lower bound on the bucket count: the caller
+        # already decided how many days to plot.
+        start = today - timedelta(days=days - 1)
+        queryset = queryset.filter(date__date__gte=start)
 
     rows = (
-        Transaction.objects.filter(
-            _party_q(user),
-            status__in=COMPLETED_STATUSES,
-            date__date__gte=start,
-        )
-        .annotate(bucket=TruncDate("date"))
+        queryset.annotate(bucket=TruncDate("date"))
         .values("bucket")
         .annotate(
             received=Sum("amount", filter=_received_q(user)),
@@ -205,6 +273,15 @@ def get_daily_net_flow(user, days=90):
         )
     )
     by_day = {row["bucket"]: row for row in rows}
+
+    if days is None:
+        # The bucket range is derived from the rows already in hand, so the "all
+        # time" path still costs exactly one query. Buckets are local dates, so
+        # the `__date` lookup above and this comparison share one calendar.
+        earliest = min(by_day) if by_day else today
+        span = max(1, min((today - earliest).days + 1, MAX_FLOW_DAYS))
+        start = today - timedelta(days=span - 1)
+        days = span
 
     out = []
     for offset in range(days):
@@ -223,8 +300,11 @@ def get_daily_net_flow(user, days=90):
     return out
 
 
-def get_weekly_volume(user, weeks=12):
+def get_weekly_volume(user, weeks=12, transaction_type=None):
     """One bucket per ISO week (Monday start), oldest first, zero-filled.
+
+    The caller computes ``weeks`` from the chosen period. ``transaction_type``
+    narrows to ``transfer`` or ``request``; ``None`` adds nothing to the query.
 
     Query count: **1**.
     """
@@ -238,6 +318,7 @@ def get_weekly_volume(user, weeks=12):
             status__in=COMPLETED_STATUSES,
             date__date__gte=start,
         )
+        .filter(_type_q(transaction_type))
         .annotate(bucket=TruncWeek("date"))
         .values("bucket")
         .annotate(
@@ -264,28 +345,37 @@ def get_weekly_volume(user, weeks=12):
     return out
 
 
-def get_status_breakdown(user):
+def get_status_breakdown(user, transaction_type=None):
     """Count of the user's transactions per status, including zeroes.
+
+    ``transaction_type`` narrows to ``transfer`` or ``request``; ``None`` adds
+    nothing to the query. Every status key is still returned, so the doughnut
+    keeps a stable legend.
 
     Query count: **1**.
     """
     counts = {
         row["status"]: row["n"]
         for row in Transaction.objects.filter(_party_q(user))
+        .filter(_type_q(transaction_type))
         .values("status")
         .annotate(n=Count("pk"))
     }
     return {key: counts.get(key, 0) for key in STATUS_KEYS}
 
 
-def get_recent_transactions(user, limit=8):
+def get_recent_transactions(user, limit=8, transaction_type=None):
     """The user's most recent transactions, newest first.
+
+    ``transaction_type`` narrows to ``transfer`` or ``request``; ``None`` adds
+    nothing to the query.
 
     Query count: **1** -- related users and their KYC rows are joined, so a
     template can read ``transaction.sender.kyc.full_name`` without an N+1.
     """
     return list(
         Transaction.objects.filter(_party_q(user))
+        .filter(_type_q(transaction_type))
         .select_related(
             "sender",
             "sender__kyc",
@@ -298,13 +388,17 @@ def get_recent_transactions(user, limit=8):
     )
 
 
-def get_top_counterparties(user, limit=5):
+def get_top_counterparties(user, limit=5, transaction_type=None):
     """Who the user moves the most money with, by volume, descending.
+
+    ``transaction_type`` narrows to ``transfer`` or ``request``; ``None`` adds
+    nothing to the query.
 
     Query count: **2** -- one grouped aggregate, one name lookup.
     """
     rows = (
         Transaction.objects.filter(_party_q(user), status__in=COMPLETED_STATUSES)
+        .filter(_type_q(transaction_type))
         .annotate(
             counterparty=Case(
                 When(sender=user, then=F("reciever")),
@@ -465,7 +559,7 @@ def _delta_pct(current, previous):
     return round(float((Decimal(current) - Decimal(previous)) * 100 / Decimal(previous)), 1)
 
 
-def get_kpi_deltas(user, days=30):
+def get_kpi_deltas(user, days=30, transaction_type=None):
     """Current-vs-previous movement for each KPI card, plus a sparkline series.
 
     ``current`` is the trailing ``days`` window, ``previous`` the window before
@@ -481,38 +575,59 @@ def get_kpi_deltas(user, days=30):
     ``largest_amount`` is a single event, so it gets ``delta_pct = None`` and an
     empty sparkline: a one-point trend line would be meaningless.
 
+    ``days=None`` is "all time". There is no window before the whole history, so
+    every ``delta_pct`` is ``None`` and only the sparkline -- still the last
+    :data:`MAX_SPARKLINE_DAYS` days -- carries a trend. ``transaction_type``
+    narrows every figure, including the point-in-time balance reconstruction
+    that depends on the window's net flow.
+
     Query count: **3**.
     """
     now = timezone.now()
-    window_start = now - timedelta(days=days)
-    previous_start = window_start - timedelta(days=days)
     completed = Q(status__in=COMPLETED_STATUSES)
 
-    # pending_count is the one KPI measured over a week rather than a month.
+    if days is None:
+        window_start = None
+        previous_start = None
+        spark_days = MAX_SPARKLINE_DAYS
+    else:
+        window_start = now - timedelta(days=days)
+        previous_start = window_start - timedelta(days=days)
+        spark_days = min(days, MAX_SPARKLINE_DAYS)
+
+    # pending_count is the one KPI measured over a week rather than the period.
     pending_start = now - timedelta(days=SPARKLINE_DAYS)
     pending_previous_start = pending_start - timedelta(days=SPARKLINE_DAYS)
 
-    # --- query 1: both 30-day windows in one pass -------------------------
-    totals = Transaction.objects.filter(
-        _party_q(user), date__gte=previous_start
-    ).aggregate(
-        cur_received=Sum("amount", filter=Q(date__gte=window_start) & _received_q(user) & completed),
-        prev_received=Sum("amount", filter=Q(date__lt=window_start) & _received_q(user) & completed),
-        cur_sent=Sum("amount", filter=Q(date__gte=window_start) & _sent_q(user) & completed),
-        prev_sent=Sum("amount", filter=Q(date__lt=window_start) & _sent_q(user) & completed),
-        cur_count=Count("pk", filter=Q(date__gte=window_start)),
-        prev_count=Count("pk", filter=Q(date__lt=window_start)),
-        cur_average=Avg("amount", filter=Q(date__gte=window_start) & completed),
-        prev_average=Avg("amount", filter=Q(date__lt=window_start) & completed),
-        cur_largest=Max("amount", filter=Q(date__gte=window_start) & completed),
-        prev_largest=Max("amount", filter=Q(date__lt=window_start) & completed),
-        cur_pending=Count("pk", filter=Q(date__gte=pending_start) & Q(status__in=PENDING_STATUSES)),
-        prev_pending=Count(
-            "pk",
-            filter=Q(date__gte=pending_previous_start)
-            & Q(date__lt=pending_start)
-            & Q(status__in=PENDING_STATUSES),
-        ),
+    # --- query 1: both windows in one pass ---------------------------------
+    # The window bounds are Q objects rather than queryset filters so that "all
+    # time" (window_start is None) simply drops them.
+    cur_window = Q(date__gte=window_start) if window_start is not None else Q()
+    prev_window = Q(date__lt=window_start) if window_start is not None else Q()
+
+    totals = (
+        Transaction.objects.filter(_party_q(user))
+        .filter(Q(date__gte=previous_start) if previous_start is not None else Q())
+        .filter(_type_q(transaction_type))
+        .aggregate(
+            cur_received=Sum("amount", filter=cur_window & _received_q(user) & completed),
+            prev_received=Sum("amount", filter=prev_window & _received_q(user) & completed),
+            cur_sent=Sum("amount", filter=cur_window & _sent_q(user) & completed),
+            prev_sent=Sum("amount", filter=prev_window & _sent_q(user) & completed),
+            cur_count=Count("pk", filter=cur_window),
+            prev_count=Count("pk", filter=prev_window),
+            cur_average=Avg("amount", filter=cur_window & completed),
+            prev_average=Avg("amount", filter=prev_window & completed),
+            cur_largest=Max("amount", filter=cur_window & completed),
+            prev_largest=Max("amount", filter=prev_window & completed),
+            cur_pending=Count("pk", filter=Q(date__gte=pending_start) & Q(status__in=PENDING_STATUSES)),
+            prev_pending=Count(
+                "pk",
+                filter=Q(date__gte=pending_previous_start)
+                & Q(date__lt=pending_start)
+                & Q(status__in=PENDING_STATUSES),
+            ),
+        )
     )
 
     cur_received = _money(totals["cur_received"])
@@ -522,13 +637,12 @@ def get_kpi_deltas(user, days=30):
     cur_net = (cur_received - cur_sent).quantize(ZERO)
     prev_net = (prev_received - prev_sent).quantize(ZERO)
 
-    # --- query 2: the last 7 days, one row per day ------------------------
+    # --- query 2: one row per sparkline day -------------------------------
     today = timezone.localdate()
-    flow_start = today - timedelta(days=SPARKLINE_DAYS - 1)
+    flow_start = today - timedelta(days=spark_days - 1)
     daily_rows = (
-        Transaction.objects.filter(
-            _party_q(user), date__date__gte=flow_start
-        )
+        Transaction.objects.filter(_party_q(user), date__date__gte=flow_start)
+        .filter(_type_q(transaction_type))
         .annotate(bucket=TruncDate("date"))
         .values("bucket")
         .annotate(
@@ -541,7 +655,7 @@ def get_kpi_deltas(user, days=30):
     by_day = {row["bucket"]: row for row in daily_rows}
 
     daily_received, daily_sent, daily_count, daily_pending = [], [], [], []
-    for offset in range(SPARKLINE_DAYS):
+    for offset in range(spark_days):
         row = by_day.get(flow_start + timedelta(days=offset))
         daily_received.append(_money(row["received"]) if row else ZERO)
         daily_sent.append(_money(row["sent"]) if row else ZERO)
@@ -555,20 +669,28 @@ def get_kpi_deltas(user, days=30):
     balance_now = _money(account.account_balance) if account else ZERO
 
     # The balance a full window ago: today's balance minus the window's net flow.
-    # Deliberately the *days* window (not the 7 day sparkline window) -- a
-    # movement from 10 days ago belongs in this comparison but not in the
-    # 7-point series.
-    balance_window_ago = (balance_now - cur_net).quantize(ZERO)
+    # Deliberately the *days* window, not the sparkline window -- a movement from
+    # 10 days ago belongs in this comparison but not in the 7-point series. Under
+    # "all time" there is no earlier balance to reconstruct, so it is None and
+    # the card falls back to its "no comparison" text.
+    balance_window_ago = (
+        None if days is None else (balance_now - cur_net).quantize(ZERO)
+    )
 
-    # The sparkline, by contrast, is a 7 day closing-balance series, so it is
-    # anchored a week back and walked forward.
-    balance_week_ago = balance_now - sum(daily_net, ZERO)
-    balance_series, running = [], balance_week_ago
+    # The sparkline, by contrast, is a closing-balance series over the sparkline
+    # window, so it is anchored at its start and walked forward.
+    balance_series_start = balance_now - sum(daily_net, ZERO)
+    balance_series, running = [], balance_series_start
     for value in daily_net:
         running += value
         balance_series.append(running)
 
     def entry(current, previous, series=None, sparkline=True):
+        # Under "all time" there is no earlier window, so the aggregate returns 0
+        # for the previous sums. That 0 is not a measurement -- reporting it would
+        # render a confident "0.0%" against a series with no history behind it.
+        if days is None:
+            previous = None
         return {
             "current": current,
             "previous": previous,
@@ -589,7 +711,7 @@ def get_kpi_deltas(user, days=30):
         # A largest-ever single movement cannot be trended.
         "largest_amount": {
             "current": _money(totals["cur_largest"]),
-            "previous": _money(totals["prev_largest"]),
+            "previous": None if days is None else _money(totals["prev_largest"]),
             "delta_pct": None,
             "sparkline_points": "",
         },
