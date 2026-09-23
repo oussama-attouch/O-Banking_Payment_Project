@@ -1,5 +1,5 @@
 from django.contrib import admin
-from account.models import Account, KYC, Recipient
+from account.models import Account, KYC, Recipient, Notification
 from userauths.models import User
 from import_export.admin import ImportExportModelAdmin
 
@@ -59,3 +59,20 @@ admin.site.register(KYC, KYCAdmin)
 
 # Register the Recipient model with the custom admin class
 admin.site.register(Recipient, RecipientAdmin)
+
+
+# Money-event notifications (Phase 5g-1). Rows are written by the signal in
+# account/notifications.py; the admin is read-mostly on purpose.
+# autocomplete_fields = ["user"] needs search_fields on the referenced admin;
+# django.contrib.auth.admin.UserAdmin already defines
+# ('username', 'first_name', 'last_name', 'email').
+class NotificationAdmin(ImportExportModelAdmin):
+    list_display = ["user", "kind", "title", "is_read", "created_at"]
+    list_filter = ["kind", "is_read", "created_at"]
+    search_fields = ["user__username", "user__email", "title", "body"]
+    readonly_fields = ["created_at"]
+    autocomplete_fields = ["user"]
+
+
+# Register the Notification model with the custom admin class
+admin.site.register(Notification, NotificationAdmin)

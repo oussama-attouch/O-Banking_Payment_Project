@@ -228,3 +228,48 @@ class Recipient(models.Model):
         if self.target_account_id and self.user_id:
             if self.target_account.user_id == self.user_id:
                 raise ValidationError({"target_account": "You cannot save your own account as a recipient."})
+
+
+# User-facing notifications about money events (Phase 5g-1). This phase is the
+# model, the signal that fills it, the migration, the admin and the tests only;
+# Phase 5g-2 builds the bell dropdown that reads it.
+class Notification(models.Model):
+    """A short, user-facing message about a money event. Created
+    automatically by the signal in account/notifications.py when a
+    Transaction transitions into a settled state. Never created
+    for rows that fail; failed transactions get a separate kind."""
+
+    KIND_MONEY_IN = "money_in"
+    KIND_MONEY_OUT = "money_out"
+    KIND_REQUEST = "request"
+    KIND_SETTLED = "settled"
+    KIND_KYC = "kyc"
+    KIND_CHOICES = [
+        (KIND_MONEY_IN, "Money in"),
+        (KIND_MONEY_OUT, "Money out"),
+        (KIND_REQUEST, "Payment request"),
+        (KIND_SETTLED, "Settlement"),
+        (KIND_KYC, "KYC"),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    title = models.CharField(max_length=200)
+    body = models.CharField(max_length=400, blank=True)
+    link = models.CharField(max_length=300, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["user", "is_read"]),
+        ]
+
+    def __str__(self):
+        return f"{self.get_kind_display()}: {self.title}"

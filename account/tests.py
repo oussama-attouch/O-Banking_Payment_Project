@@ -23,7 +23,7 @@ from django.utils import timezone
 from PIL import Image
 
 from account import analytics
-from account.models import Account, KYC, Recipient
+from account.models import Account, KYC, Recipient, Notification
 from core.models import Transaction
 from userauths.models import User
 
@@ -1287,3 +1287,118 @@ class RecipientViewTests(TestCase):
         )
         self.assertContains(resp, "Recipient not found.")
         self.assertTrue(Recipient.objects.filter(pk=recipient.pk).exists())
+
+
+# =====================================================================
+# Phase 5g-1  money-event notifications
+# =====================================================================
+class NotificationTests(TestCase):
+    """The signal in account/notifications.py observes core.Transaction and
+    writes Notification rows when a row newly enters a settled state.
+
+    These are pure-ORM tests: they exercise the receiver, not a view, so
+    there is no client and no SECURE_* override.
+    """
+
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="notif_alice", email="notif_alice@test.invalid", password=PASSWORD
+        )
+        self.bob = User.objects.create_user(
+            username="notif_bob", email="notif_bob@test.invalid", password=PASSWORD
+        )
+        # create_account provisions one Account per User on creation.
+        self.alice_acct = Account.objects.get(user=self.alice)
+        self.bob_acct = Account.objects.get(user=self.bob)
+
+    def make_txn(self, status, ttype="transfer", amount="25.00"):
+        return Transaction.objects.create(
+            user=self.alice,
+            sender=self.alice,
+            reciever=self.bob,
+            sender_account=self.alice_acct,
+            reciever_account=self.bob_acct,
+            amount=Decimal(amount),
+            status=status,
+            transaction_type=ttype,
+        )
+
+    @staticmethod
+    def link_for(txn):
+        return "/transaction-detail/%s/" % txn.transaction_id
+
+    # ------------------------------------------------------- settled: money in/out
+    def test_notification_created_on_completed_transfer(self):
+        txn = self.make_txn("completed")
+
+        self.assertEqual(Notification.objects.count(), 2)
+
+        received = Notification.objects.filter(user=self.bob)
+        sent = Notification.objects.filter(user=self.alice)
+        self.assertEqual(received.count(), 1)
+        self.assertEqual(sent.count(), 1)
+
+        self.assertEqual(received.first().kind, Notification.KIND_MONEY_IN)
+        self.assertEqual(sent.first().kind, Notification.KIND_MONEY_OUT)
+
+        # Both parties get a link to the same transaction.
+        self.assertEqual(received.first().link, self.link_for(txn))
+        self.assertEqual(sent.first().link, self.link_for(txn))
+
+    def test_notification_created_on_request_settled(self):
+        txn = self.make_txn("request_settled", ttype="request")
+
+        rows = Notification.objects.all()
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual(
+            set(rows.values_list("user_id", flat=True)),
+            {self.alice.pk, self.bob.pk},
+        )
+        for row in rows:
+            self.assertEqual(row.kind, Notification.KIND_SETTLED)
+            self.assertEqual(row.link, self.link_for(txn))
+
+    # -------------------------------------------------------------- no false positives
+    def test_notification_not_created_for_pending_transfer(self):
+        self.make_txn("processing")
+        self.assertEqual(Notification.objects.count(), 0)
+
+    def test_notification_not_created_on_second_save(self):
+        txn = self.make_txn("completed")
+        self.assertEqual(Notification.objects.count(), 2)
+
+        # Re-saving the same row in the same settled status must not duplicate.
+        txn.save()
+        self.assertEqual(Notification.objects.count(), 2)
+
+    # ------------------------------------------------------------- pending request
+    def test_pending_request_notification(self):
+        self.make_txn("request_sent", ttype="request")
+
+        rows = Notification.objects.all()
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.first().kind, Notification.KIND_REQUEST)
+        self.assertEqual(rows.first().user_id, self.bob.pk)
+
+    # ------------------------------------------------------------------- helper
+    def test_notify_helper_noop_for_none_user(self):
+        from account.notifications import notify
+
+        self.assertIsNone(notify(None, Notification.KIND_KYC, "Nobody"))
+        self.assertEqual(Notification.objects.count(), 0)
+
+    # ----------------------------------------------------------------- cascade
+    def test_notification_cascade_on_user_delete(self):
+        Notification.objects.create(
+            user=self.bob, kind=Notification.KIND_KYC, title="Your KYC was approved"
+        )
+        self.assertEqual(Notification.objects.filter(user=self.bob).count(), 1)
+
+        self.bob.delete()
+        self.assertEqual(Notification.objects.count(), 0)
+
+    # ----------------------------------------------------------------- indexes
+    def test_notification_indexes_exist(self):
+        fields = [tuple(index.fields) for index in Notification._meta.indexes]
+        self.assertIn(("user", "-created_at"), fields)
+        self.assertIn(("user", "is_read"), fields)
