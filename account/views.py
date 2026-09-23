@@ -1,12 +1,17 @@
+import csv
+import datetime
 from decimal import Decimal
 
-from django.http import JsonResponse
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncMonth
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.utils import timezone
 
 from account import analytics
 from account.models import KYC, Account
 from account.forms import KYCForm, ProfileForm
+from core.models import Transaction
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 
@@ -224,3 +229,310 @@ def settings_view(request):
         "profile_form": profile_form,
     }
     return render(request, "account/settings.html", context)
+
+
+# =====================================================================
+# Phase 5e  statements
+# =====================================================================
+#: ``(query-string value, button label)``, in the order the range selector
+#: renders them.
+STATEMENT_RANGES = (
+    ("this_month", "This month"),
+    ("last_3_months", "Last 3 months"),
+    ("this_year", "This year"),
+    ("last_12_months", "Last 12 months"),
+)
+STATEMENT_RANGE_KEYS = tuple(key for key, _ in STATEMENT_RANGES)
+STATEMENT_RANGE_LABELS = dict(STATEMENT_RANGES)
+
+#: Statuses on which money has actually moved. Restated rather than imported:
+#: this mirrors ``account.analytics.COMPLETED_STATUSES`` and Phase 5e may not
+#: change that module.
+SETTLED_STATUSES = ("completed", "request_settled")
+
+#: Rows drawn in "Recent activity", and the hard cap on one export.
+STATEMENT_ROW_LIMIT = 50
+EXPORT_ROW_CAP = 5000
+
+ZERO = Decimal("0.00")
+
+
+def _money(value):
+    """Normalise an aggregate to a 2-place ``Decimal``."""
+    return (value or ZERO).quantize(ZERO)
+
+
+def _month_floor(anchor, months_back=0):
+    """First day of the calendar month ``months_back`` months before ``anchor``.
+
+    Negative values move forward. Plain ``datetime`` arithmetic: the project has
+    no dateutil dependency and this phase adds none.
+    """
+    index = (anchor.year * 12) + (anchor.month - 1) - months_back
+    year, month = divmod(index, 12)
+    return datetime.date(year, month + 1, 1)
+
+
+def _statement_range_key(request):
+    """The requested range, or ``this_month`` for anything unrecognised.
+
+    Normalising here (rather than reading ``request.GET`` again at the call
+    site) is what keeps an unknown ``?range=`` rendering identically to no
+    parameter at all, active button included.
+    """
+    key = (request.GET.get("range") or "").strip()
+    return key if key in STATEMENT_RANGE_KEYS else "this_month"
+
+
+def _statement_scope(request):
+    """Return ``(start_date, end_date, label)`` for the ``?range=`` parameter.
+
+    Every window ends *today* and starts on a calendar boundary, so the monthly
+    breakdown never opens on a partial month. An unknown or missing value falls
+    back to ``this_month``.
+    """
+    key = _statement_range_key(request)
+    today = timezone.localdate()
+
+    if key == "last_3_months":
+        start = _month_floor(today, 2)
+    elif key == "this_year":
+        start = today.replace(month=1, day=1)
+    elif key == "last_12_months":
+        start = _month_floor(today, 11)
+    else:
+        start = _month_floor(today)
+
+    return start, today, STATEMENT_RANGE_LABELS[key]
+
+
+def _statement_transactions(user, start, end):
+    """The user's transactions inside ``[start, end]``, both ends included.
+
+    The party filter is written out here instead of importing
+    ``analytics._party_q``: that name is private, and this phase may not change
+    that module. ``date__date`` compares local calendar days -- the same days
+    the page prints.
+    """
+    return Transaction.objects.filter(
+        Q(user=user) | Q(sender=user) | Q(reciever=user),
+        date__date__gte=start,
+        date__date__lte=end,
+    )
+
+
+def _settled_in_q(user):
+    """Rows that moved money *into* the user's account.
+
+    Direction rule: a transfer pays the reciever, and a *settled* request pays
+    the requester (the stored ``sender``). Only settled statuses count.
+    """
+    return (
+        Q(transaction_type="transfer", reciever=user)
+        | Q(transaction_type="request", sender=user)
+    ) & Q(status__in=SETTLED_STATUSES)
+
+
+def _settled_out_q(user):
+    """Rows that moved money *out of* the user's account."""
+    return (
+        Q(transaction_type="transfer", sender=user)
+        | Q(transaction_type="request", reciever=user)
+    ) & Q(status__in=SETTLED_STATUSES)
+
+
+def _statement_direction(user, txn):
+    """``"in"``, ``"out"``, or ``""`` when no money has moved on this row."""
+    if txn.status not in SETTLED_STATUSES:
+        return ""
+    if txn.transaction_type == "transfer":
+        return "in" if txn.reciever_id == user.pk else "out"
+    if txn.transaction_type == "request":
+        return "in" if txn.sender_id == user.pk else "out"
+    # recieved / withdraw / refund / none: not a direction this page can vouch for.
+    return ""
+
+
+def _statement_counterparty(user, txn):
+    """The other party on ``txn``, from ``user``'s point of view."""
+    if txn.sender_id == user.pk:
+        return txn.reciever
+    return txn.sender
+
+
+def _statement_name(person):
+    """KYC full name when there is one, else the username."""
+    if person is None:
+        return ""
+    kyc = getattr(person, "kyc", None)
+    full_name = (getattr(kyc, "full_name", None) or "").strip()
+    return full_name or person.username
+
+
+def _monthly_breakdown(user, scope, start, end):
+    """One row per calendar month in the range, ascending, zero-filled.
+
+    ``count`` is every transaction in the month whatever its status; ``in`` and
+    ``out`` only count settled movements, exactly like the summary cards.
+    """
+    buckets = {}
+    cursor = _month_floor(start)
+    while cursor <= end:
+        buckets[cursor] = {"month_label": cursor.strftime("%b %Y"), "in": ZERO,
+                           "out": ZERO, "net": ZERO, "count": 0}
+        cursor = _month_floor(cursor, -1)
+
+    rows = (
+        scope.annotate(month=TruncMonth("date"))
+        .values("month")
+        .annotate(
+            month_in=Sum("amount", filter=_settled_in_q(user)),
+            month_out=Sum("amount", filter=_settled_out_q(user)),
+            month_count=Count("pk"),
+        )
+        .order_by("month")
+    )
+
+    for row in rows:
+        month = row["month"]
+        if timezone.is_aware(month):
+            month = timezone.localtime(month)
+        # setdefault: a month outside the zero-filled range cannot occur, but if
+        # the timezone ever shifted one across a boundary it would still be shown
+        # rather than silently dropped.
+        bucket = buckets.setdefault(
+            month.date().replace(day=1),
+            {"month_label": month.strftime("%b %Y"), "in": ZERO, "out": ZERO,
+             "net": ZERO, "count": 0},
+        )
+        bucket["in"] = _money(row["month_in"])
+        bucket["out"] = _money(row["month_out"])
+        bucket["net"] = (bucket["in"] - bucket["out"]).quantize(ZERO)
+        bucket["count"] = row["month_count"] or 0
+
+    return list(buckets.values())
+
+
+def _statement_rows(user, queryset):
+    """Rows for the activity table and the CSV: row, direction, counterparty."""
+    return [
+        {
+            "transaction": txn,
+            "direction": _statement_direction(user, txn),
+            "counterparty": _statement_name(_statement_counterparty(user, txn)),
+        }
+        for txn in queryset
+    ]
+
+
+@login_required
+def statements_view(request):
+    """A date-ranged statement of the signed-in user's money movement.
+
+    KYC-gated like the dashboard and ``account.views.account``: the figures are
+    the same banking data, so the same gate applies. Read-only throughout.
+    """
+    blocked = _kyc_required(request)
+    if blocked:
+        return blocked
+
+    user = request.user
+    start, end, label = _statement_scope(request)
+    scope = _statement_transactions(user, start, end)
+
+    # One aggregate, three figures: each filter becomes a CASE WHEN.
+    totals = scope.aggregate(
+        total_in=Sum("amount", filter=_settled_in_q(user)),
+        total_out=Sum("amount", filter=_settled_out_q(user)),
+        total_count=Count("pk"),
+    )
+    total_in = _money(totals["total_in"])
+    total_out = _money(totals["total_out"])
+    total_count = totals["total_count"] or 0
+
+    recent = scope.select_related(
+        "sender",
+        "sender__kyc",
+        "reciever",
+        "reciever__kyc",
+        "sender_account",
+        "reciever_account",
+    ).order_by("-date", "-id")[:STATEMENT_ROW_LIMIT]
+
+    context = {
+        "account": getattr(user, "account", None),
+        "kyc": getattr(user, "kyc", None),
+        "range_key": _statement_range_key(request),
+        "range_label": label,
+        "range_choices": STATEMENT_RANGES,
+        "start_date": start,
+        "end_date": end,
+        "summary": {
+            "in": total_in,
+            "out": total_out,
+            "net": (total_in - total_out).quantize(ZERO),
+            "count": total_count,
+        },
+        "monthly": _monthly_breakdown(user, scope, start, end),
+        "transactions": _statement_rows(user, recent),
+        "transactions_total": total_count,
+    }
+    return render(request, "account/statements.html", context)
+
+
+@login_required
+def export_csv(request):
+    """The same filtered statement as a CSV download.
+
+    Login-only, deliberately: the statements page is already behind the KYC
+    gate, and refusing the download of figures the user was just shown would be
+    surprising -- so a missing Account or KYC row never blocks the export. The
+    cap keeps one request from streaming an unbounded file; over it the answer
+    is a plain 400 the user can act on, not a 500.
+    """
+    user = request.user
+    start, end, _label = _statement_scope(request)
+    scope = _statement_transactions(user, start, end)
+
+    if scope.count() > EXPORT_ROW_CAP:
+        return HttpResponse(
+            "Too many rows to export. Narrow the range.",
+            status=400,
+            content_type="text/plain",
+        )
+
+    response = HttpResponse(content_type="text/csv")
+    filename = f"o-banking-statements-{start}-to-{end}.csv"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    writer = csv.writer(response)
+    writer.writerow([
+        "date", "type", "direction", "counterparty",
+        "amount", "status", "reference", "description",
+    ])
+
+    rows = scope.select_related(
+        "sender",
+        "sender__kyc",
+        "reciever",
+        "reciever__kyc",
+        "sender_account",
+        "reciever_account",
+    ).order_by("-date", "-id")
+
+    for txn in rows:
+        when = txn.date
+        if timezone.is_aware(when):
+            when = timezone.localtime(when)
+        writer.writerow([
+            when.isoformat(),
+            txn.get_transaction_type_display(),
+            _statement_direction(user, txn),
+            _statement_name(_statement_counterparty(user, txn)),
+            f"{txn.amount:.2f}",
+            txn.get_status_display(),
+            txn.transaction_id,
+            txn.description or "",
+        ])
+
+    return response

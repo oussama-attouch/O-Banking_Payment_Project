@@ -9,7 +9,9 @@ silently reverted balance changes made through a different Account instance.
 """
 from datetime import timedelta
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
+import csv
+import re
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
@@ -779,3 +781,187 @@ class SettingsTests(TestCase):
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password(PASSWORD))
         self.assertFalse(self.user.check_password(new_password))
+
+
+# =====================================================================
+# Phase 5e  statements
+# =====================================================================
+class StatementsTests(TestCase):
+    """The statements page and its CSV export.
+
+    The page carries the dashboard's KYC gate, so both users below have a KYC
+    row; the export is login-only by design.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
+
+    def setUp(self):
+        self.alice = self.make_user("stmt_alice")
+        self.bob = self.make_user("stmt_bob")
+        self.client.force_login(self.alice)
+
+    def make_user(self, name):
+        user = User.objects.create_user(
+            username=name, email="%s@test.invalid" % name, password=PASSWORD
+        )
+        acct = Account.objects.get(user=user)
+        KYC.objects.create(
+            user=user,
+            account=acct,
+            full_name="%s Person" % name.title(),
+            nationality="MA",
+            marrital_status="single",
+            gender="male",
+            identity_type="passport",
+            date_of_birth=timezone.now(),
+            signature="kyc/test.png",
+            country="MA",
+            city="Casablanca",
+            state="Casablanca",
+            mobile="0600000000",
+            fax="",
+        )
+        return user
+
+    def make_txn(self, sender, reciever, amount, status="completed",
+                 ttype="transfer", description="", when=None):
+        txn = Transaction.objects.create(
+            user=sender,
+            sender=sender,
+            reciever=reciever,
+            sender_account=Account.objects.get(user=sender),
+            reciever_account=Account.objects.get(user=reciever),
+            amount=Decimal(amount),
+            status=status,
+            transaction_type=ttype,
+            description=description,
+        )
+        if when is not None:
+            # date is auto_now_add, so it can only be moved with an UPDATE.
+            Transaction.objects.filter(pk=txn.pk).update(date=when)
+            txn.refresh_from_db()
+        return txn
+
+    def range_button(self, resp, key):
+        """The opening tag of the range selector button for ``key``.
+
+        Anchored on ``statements/?range=`` so the CSV link, which carries the
+        same query string, cannot be mistaken for a selector button.
+        """
+        match = re.search(
+            r'<a[^>]+href="[^"]*statements/\?range=%s"[^>]*>' % re.escape(key),
+            resp.content.decode(),
+        )
+        self.assertIsNotNone(match, "no range button rendered for %r" % key)
+        return match.group(0)
+
+    # -------------------------------------------------------------- page
+    def test_statements_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("account:statements"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_statements_renders_for_authenticated(self):
+        resp = self.client.get(reverse("account:statements"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Statements")
+
+    def test_statements_default_range_is_this_month(self):
+        resp = self.client.get(reverse("account:statements"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("btn-primary", self.range_button(resp, "this_month"))
+        for other in ("last_3_months", "this_year", "last_12_months"):
+            with self.subTest(range=other):
+                self.assertIn("btn-outline-secondary", self.range_button(resp, other))
+
+    def test_statements_unknown_range_falls_back(self):
+        default = self.client.get(reverse("account:statements"))
+        garbage = self.client.get(reverse("account:statements"), {"range": "garbage"})
+        self.assertEqual(garbage.status_code, 200)
+        self.assertEqual(
+            garbage.context["range_key"], default.context["range_key"],
+            "an unknown range must normalise to the default",
+        )
+        self.assertIn("btn-primary", self.range_button(garbage, "this_month"))
+
+    # ----------------------------------------------------------- summary
+    def test_statements_summary_respects_direction(self):
+        # Money in: a completed transfer where alice is the reciever.
+        self.make_txn(self.bob, self.alice, "100.00")
+        # Money in: a settled request where alice is the requester (sender).
+        self.make_txn(self.alice, self.bob, "50.00", status="request_settled",
+                      ttype="request")
+        summary = self.client.get(reverse("account:statements")).context["summary"]
+        self.assertEqual(summary["in"], Decimal("150.00"))
+        self.assertEqual(summary["out"], Decimal("0.00"))
+
+        # Money out: a completed transfer where alice is the sender.
+        self.make_txn(self.alice, self.bob, "30.00")
+        summary = self.client.get(reverse("account:statements")).context["summary"]
+        self.assertEqual(summary["out"], Decimal("30.00"))
+        self.assertEqual(summary["net"], Decimal("120.00"))
+        self.assertEqual(summary["count"], 3)
+
+        # A movement still in flight is counted as a row but moves no money.
+        self.make_txn(self.bob, self.alice, "999.00", status="processing")
+        context = self.client.get(reverse("account:statements")).context
+        self.assertEqual(context["summary"]["in"], Decimal("150.00"))
+        self.assertEqual(context["summary"]["out"], Decimal("30.00"))
+        self.assertEqual(context["summary"]["count"], 4)
+        self.assertIn("", [row["direction"] for row in context["transactions"]],
+                      "an in-flight row must render unsigned")
+
+    # ----------------------------------------------------------- monthly
+    def test_statements_monthly_breakdown(self):
+        when = timezone.now()
+        self.make_txn(self.bob, self.alice, "40.00", when=when)
+        self.make_txn(self.alice, self.bob, "10.00", when=when)
+        monthly = self.client.get(reverse("account:statements")).context["monthly"]
+
+        # The default range is a single month, so the breakdown has one row.
+        self.assertEqual(len(monthly), 1)
+        self.assertEqual(monthly[0]["count"], 2)
+        self.assertEqual(monthly[0]["in"], Decimal("40.00"))
+        self.assertEqual(monthly[0]["out"], Decimal("10.00"))
+        self.assertEqual(monthly[0]["net"], Decimal("30.00"))
+        self.assertEqual(monthly[0]["month_label"], when.strftime("%b %Y"))
+
+    # -------------------------------------------------------------- csv
+    def test_csv_export_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("account:statements_export"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_csv_export_content(self):
+        self.make_txn(self.bob, self.alice, "12.50", description="for lunch")
+        self.make_txn(self.alice, self.bob, "7.25")
+
+        resp = self.client.get(reverse("account:statements_export"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp["Content-Type"].startswith("text/csv"),
+                        resp["Content-Type"])
+        self.assertTrue(resp["Content-Disposition"].startswith("attachment"),
+                        resp["Content-Disposition"])
+
+        rows = list(csv.reader(StringIO(resp.content.decode("utf-8"))))
+        self.assertEqual(len(rows), 3, "one header row plus two data rows: %s" % rows)
+        self.assertEqual(rows[0], ["date", "type", "direction", "counterparty",
+                                   "amount", "status", "reference", "description"])
+        self.assertEqual({row[2] for row in rows[1:]}, {"in", "out"})
+        self.assertEqual({row[4] for row in rows[1:]}, {"12.50", "7.25"})
+        self.assertEqual({row[3] for row in rows[1:]}, {"Stmt_Bob Person"})

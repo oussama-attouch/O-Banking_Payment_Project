@@ -27,4 +27,8 @@ urlpatterns = [
         ),
         name="password_change",
     ),
+
+    # Phase 5e. The export is the same filtered set as the page, as CSV.
+    path("statements/", views.statements_view, name="statements"),
+    path("statements/export.csv", views.export_csv, name="statements_export"),
 ]

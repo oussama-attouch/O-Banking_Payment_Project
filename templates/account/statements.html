@@ -1,0 +1,217 @@
+{% extends "partials/dashboard-base.html" %}
+{% load humanize %}
+
+{% block title %}Statements &middot; O-Banking{% endblock %}
+
+{% block content %}
+
+<!-- =================== Row 1: header and range selector ================ -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-lg-5">
+                        <h2 class="h3 mb-1">Statements</h2>
+                        <div class="text-secondary">A summary of your money movement for the selected period.</div>
+                        <div class="text-secondary small mt-1">
+                            {{ range_label }} &middot; {{ start_date|date:"d M Y" }} &ndash; {{ end_date|date:"d M Y" }}
+                        </div>
+                    </div>
+                    <div class="col-lg-7 mt-3 mt-lg-0">
+                        <div class="d-flex flex-wrap align-items-center justify-content-lg-end">
+                            <div class="btn-group me-2" role="group" aria-label="Statement period">
+                                {% for key, label in range_choices %}
+                                <a href="{% url 'account:statements' %}?range={{ key }}"
+                                   class="btn {% if range_key == key %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+                                   {% if range_key == key %}aria-current="page"{% endif %}>{{ label }}</a>
+                                {% endfor %}
+                            </div>
+                            <a href="{% url 'account:statements_export' %}?range={{ range_key }}"
+                               class="btn btn-outline-primary">
+                                <i class="ti ti-download me-1"></i> Download CSV
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ======================= Row 2: summary cards ======================== -->
+<div class="row row-deck row-cards mb-3">
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="text-secondary">Money in</div>
+                    <i class="ti ti-arrow-down-left text-success"></i>
+                </div>
+                <div class="h1 mb-1 text-success">{{ summary.in|intcomma }}</div>
+                <div class="text-secondary small">{{ summary.count }} transactions</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="text-secondary">Money out</div>
+                    <i class="ti ti-arrow-up-right text-danger"></i>
+                </div>
+                <div class="h1 mb-1 text-danger">{{ summary.out|intcomma }}</div>
+                <div class="text-secondary small">{{ summary.count }} transactions</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="text-secondary">Net</div>
+                    <i class="ti ti-scale {% if summary.net < 0 %}text-danger{% else %}text-success{% endif %}"></i>
+                </div>
+                <div class="h1 mb-1 {% if summary.net < 0 %}text-danger{% else %}text-success{% endif %}">
+                    {{ summary.net|intcomma }}
+                </div>
+                <div class="text-secondary small">{{ summary.count }} transactions</div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ====================== Row 3: monthly breakdown ===================== -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Monthly breakdown</h2>
+                <div class="text-secondary small ms-auto">
+                    Money in and money out count completed movements only
+                </div>
+            </div>
+
+            {% if monthly %}
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th class="text-end">Transactions</th>
+                            <th class="text-end">Money in</th>
+                            <th class="text-end">Money out</th>
+                            <th class="text-end">Net</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for m in monthly %}
+                        <tr>
+                            <td>{{ m.month_label }}</td>
+                            <td class="text-end">{{ m.count }}</td>
+                            <td class="text-end text-success">{{ m.in|intcomma }}</td>
+                            <td class="text-end text-danger">{{ m.out|intcomma }}</td>
+                            <td class="text-end {% if m.net < 0 %}text-danger{% else %}text-success{% endif %}">
+                                {{ m.net|intcomma }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card-body">
+                <div class="empty">
+                    <div class="empty-icon text-secondary"><i class="ti ti-calendar-stats fs-1"></i></div>
+                    <p class="empty-title">No activity in this period.</p>
+                    <p class="empty-subtitle text-secondary">
+                        Choose a wider range to see older movements.
+                    </p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ======================= Row 4: recent activity ====================== -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Recent activity</h2>
+                <div class="text-secondary small ms-auto">
+                    {% if transactions_total > transactions|length %}
+                    Showing the latest {{ transactions|length }} of {{ transactions_total }}
+                    {% else %}
+                    {{ transactions_total }} transactions
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if transactions %}
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Counterparty</th>
+                            <th class="text-end">Amount</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in transactions %}
+                        {% with t=row.transaction %}
+                        <tr>
+                            <td class="text-secondary text-nowrap">
+                                <a href="{% url 'core:transaction-detail' t.transaction_id %}">{{ t.date|date:"d M Y, H:i" }}</a>
+                            </td>
+                            <td>{{ t.get_transaction_type_display }}</td>
+                            <td class="text-truncate">{{ row.counterparty }}</td>
+                            <td class="text-end">
+                                {% if row.direction == "in" %}
+                                <span class="text-success">+{{ t.amount|intcomma }}</span>
+                                {% elif row.direction == "out" %}
+                                <span class="text-danger">&minus;{{ t.amount|intcomma }}</span>
+                                {% else %}
+                                <span class="text-secondary">{{ t.amount|intcomma }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge {% if t.status == 'completed' or t.status == 'request_settled' %}bg-success-lt{% elif t.status == 'failed' %}bg-danger-lt{% elif t.status == 'processing' or t.status == 'request_processing' %}bg-warning-lt{% elif t.status == 'request_sent' %}bg-info-lt{% else %}bg-secondary-lt{% endif %}">
+                                    <i class="ti {% if t.status == 'completed' or t.status == 'request_settled' %}ti-check{% elif t.status == 'failed' %}ti-x{% elif t.status == 'processing' or t.status == 'request_sent' or t.status == 'request_processing' %}ti-clock{% else %}ti-hourglass{% endif %} me-1"></i>{{ t.get_status_display|title }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endwith %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card-body">
+                <div class="empty">
+                    <div class="empty-icon text-secondary"><i class="ti ti-receipt fs-1"></i></div>
+                    <p class="empty-title">No transactions in this period.</p>
+                    <p class="empty-subtitle text-secondary">
+                        Choose a wider range, or send or request money to start a statement.
+                    </p>
+                    <div class="empty-action">
+                        <a href="{% url 'core:search-account' %}" class="btn btn-primary">
+                            <i class="ti ti-send me-1"></i> Send money
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% endblock content %}
