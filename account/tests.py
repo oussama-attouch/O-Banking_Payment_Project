@@ -1420,3 +1420,149 @@ class NotificationTests(TestCase):
         fields = [tuple(index.fields) for index in Notification._meta.indexes]
         self.assertIn(("user", "-created_at"), fields)
         self.assertIn(("user", "is_read"), fields)
+
+
+# =====================================================================
+# Phase 5g-2  the bell, the dropdown and the notifications page
+# =====================================================================
+class NotificationViewTests(TestCase):
+    """The topbar bell and /account/notifications/.
+
+    KYC is required: the topbar tests read /account/dashboard/, which is
+    gated by account.views._kyc_required.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
+
+    def setUp(self):
+        self.alice, self.alice_acct = self.make_user("nv_alice")
+        self.bob, self.bob_acct = self.make_user("nv_bob")
+        self.client.force_login(self.alice)
+
+    def make_user(self, name):
+        user = User.objects.create_user(
+            username=name, email="%s@test.invalid" % name, password=PASSWORD
+        )
+        acct = Account.objects.get(user=user)
+        KYC.objects.create(
+            user=user,
+            account=acct,
+            full_name="%s Person" % name.title(),
+            nationality="MA",
+            marrital_status="single",
+            gender="male",
+            identity_type="passport",
+            date_of_birth=timezone.now(),
+            signature="kyc/test.png",
+            country="MA",
+            city="Casablanca",
+            state="Casablanca",
+            mobile="0600000000",
+            fax="",
+        )
+        return user, acct
+
+    def make_notification(self, user, title="You received 10.00", kind=None, is_read=False):
+        return Notification.objects.create(
+            user=user,
+            kind=kind or Notification.KIND_MONEY_IN,
+            title=title,
+            body="body",
+            link="/transaction-detail/TRNtest000000001/",
+            is_read=is_read,
+        )
+
+    # ------------------------------------------------------------- the page
+    def test_notifications_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("account:notifications"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_notifications_renders_for_authenticated(self):
+        resp = self.client.get(reverse("account:notifications"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Money events on your account")
+
+    def test_notifications_lists_only_own_rows(self):
+        self.make_notification(self.alice, title="Alice event")
+        self.make_notification(self.bob, title="Bob event")
+
+        resp = self.client.get(reverse("account:notifications"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Alice event")
+        self.assertNotContains(resp, "Bob event")
+
+    # --------------------------------------------------------- mark one read
+    def test_notification_mark_read_requires_post(self):
+        mine = self.make_notification(self.alice)
+        resp = self.client.get(
+            reverse("account:notification_mark_read", args=[mine.pk])
+        )
+        self.assertEqual(resp.status_code, 405)
+        mine.refresh_from_db()
+        self.assertFalse(mine.is_read)
+
+    def test_notification_mark_read_own_row(self):
+        mine = self.make_notification(self.alice)
+        resp = self.client.post(
+            reverse("account:notification_mark_read", args=[mine.pk])
+        )
+        self.assertEqual(resp.status_code, 302)
+        mine.refresh_from_db()
+        self.assertTrue(mine.is_read)
+
+    def test_notification_mark_read_other_user_is_noop(self):
+        theirs = self.make_notification(self.bob)
+        resp = self.client.post(
+            reverse("account:notification_mark_read", args=[theirs.pk]), follow=True
+        )
+        self.assertContains(resp, "Notification not found.")
+        theirs.refresh_from_db()
+        self.assertFalse(theirs.is_read)
+
+    def test_notification_mark_all_read_marks_only_own(self):
+        self.make_notification(self.alice, title="Alice one")
+        self.make_notification(self.alice, title="Alice two")
+        theirs = self.make_notification(self.bob, title="Bob one")
+
+        resp = self.client.post(reverse("account:notification_mark_all_read"))
+        self.assertEqual(resp.status_code, 302)
+
+        self.assertEqual(
+            Notification.objects.filter(user=self.alice, is_read=False).count(), 0
+        )
+        theirs.refresh_from_db()
+        self.assertFalse(theirs.is_read)
+
+    # ------------------------------------------------------------- the bell
+    def test_topbar_shows_unread_count_badge(self):
+        self.make_notification(self.alice, title="One")
+        self.make_notification(self.alice, title="Two")
+
+        resp = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "ti-bell")
+        self.assertRegex(
+            resp.content.decode(),
+            r'badge-notification[^>]*>\s*2\s*<',
+        )
+
+    def test_topbar_bell_hidden_when_zero(self):
+        resp = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "ti-bell")
+        self.assertNotContains(resp, "badge-notification")

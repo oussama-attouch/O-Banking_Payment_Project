@@ -35,4 +35,10 @@ urlpatterns = [
     # Phase 5f-2. The Recipient pk is the default BigAutoField, hence <int:pk>.
     path("recipients/", views.recipients_view, name="recipients"),
     path("recipients/<int:pk>/delete/", views.recipient_delete, name="recipient_delete"),
+
+    # Phase 5g-2. The bell dropdown and the full list. Both read and write
+    # handlers are scoped to request.user.
+    path("notifications/", views.notifications_view, name="notifications"),
+    path("notifications/<int:pk>/read/", views.notification_mark_read, name="notification_mark_read"),
+    path("notifications/read-all/", views.notification_mark_all_read, name="notification_mark_all_read"),
 ]

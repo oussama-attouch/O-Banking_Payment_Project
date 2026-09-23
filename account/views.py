@@ -2,15 +2,17 @@ import csv
 import datetime
 from decimal import Decimal
 
+from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from account import analytics
-from account.models import KYC, Account, Recipient
+from account.models import KYC, Account, Notification, Recipient
 from account.forms import KYCForm, ProfileForm, RecipientForm
 from core.models import Transaction
 from django.contrib import messages
@@ -647,3 +649,76 @@ def recipient_delete(request, pk):
     recipient.delete()
     messages.success(request, f"Removed {label}.")
     return redirect("account:recipients")
+
+
+# =====================================================================
+# Phase 5g-2  notifications
+# =====================================================================
+NOTIFICATIONS_PER_PAGE = 20
+
+
+@login_required
+def notifications_view(request):
+    """The full notification list, newest first, paginated.
+
+    Login-only, like ``account:recipients`` -- a notification feed is the
+    user's own activity, not banking data, so it does not go through
+    ``_kyc_required``.
+    """
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    qs = Notification.objects.filter(user=request.user)
+    paginator = Paginator(qs, NOTIFICATIONS_PER_PAGE)
+    page_obj = paginator.get_page(request.GET.get("page"))
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "page_obj": page_obj,
+        "unread_count": qs.filter(is_read=False).count(),
+    }
+    return render(request, "account/notifications.html", context)
+
+
+def _safe_referer_redirect(request):
+    """Send the user back to the page they came from, but only on this host.
+
+    ``HTTP_REFERER`` is attacker-controlled, so it is validated with Django's
+    own host/scheme check before use: a missing, malformed or off-host value
+    falls back to the notifications list instead of turning this into an open
+    redirect.
+    """
+    referer = request.META.get("HTTP_REFERER") or ""
+    if referer and url_has_allowed_host_and_scheme(
+        referer,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return redirect(referer)
+    return redirect("account:notifications")
+
+
+@login_required
+@require_POST
+def notification_mark_read(request, pk):
+    """Mark one of the current user's notifications as read. POST only.
+
+    ``login_required`` sits outside ``require_POST`` on purpose: an anonymous
+    GET is a sign-in redirect, an authenticated GET is a 405. The queryset is
+    scoped to ``request.user``, so another user's pk is a no-op rather than a
+    permission error that would confirm the row exists.
+    """
+    updated = Notification.objects.filter(pk=pk, user=request.user).update(is_read=True)
+    if updated == 0:
+        messages.warning(request, "Notification not found.")
+    return _safe_referer_redirect(request)
+
+
+@login_required
+@require_POST
+def notification_mark_all_read(request):
+    """Mark every unread notification of the current user as read. POST only."""
+    Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+    messages.success(request, "All notifications marked as read.")
+    return redirect("account:notifications")

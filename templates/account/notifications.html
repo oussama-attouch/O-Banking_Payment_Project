@@ -1,0 +1,136 @@
+{% extends "partials/dashboard-base.html" %}
+
+{% block title %}Notifications &middot; O-Banking{% endblock %}
+
+{% block content %}
+
+<!-- ========================= Row 1: header ============================ -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <h2 class="h3 mb-1">Notifications</h2>
+                        <div class="text-secondary">Money events on your account.</div>
+                    </div>
+                    {% if unread_count %}
+                    <form method="post" action="{% url 'account:notification_mark_all_read' %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-secondary">
+                            <i class="ti ti-check"></i> Mark all as read
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================= Row 2: the list ========================== -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">All notifications</h2>
+                {% if unread_count %}
+                <div class="card-actions">
+                    <span class="badge bg-blue-lt">{{ unread_count }} unread</span>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if page_obj %}
+            <div class="list-group list-group-flush">
+                {% for n in page_obj %}
+                <div class="list-group-item{% if not n.is_read %} bg-blue-lt{% endif %}">
+                    <div class="row align-items-center">
+
+                        <div class="col-auto">
+                            {% if n.kind == "money_in" %}
+                            <span class="text-success"><i class="ti ti-arrow-down-left fs-2"></i></span>
+                            {% elif n.kind == "money_out" %}
+                            <span class="text-danger"><i class="ti ti-arrow-up-right fs-2"></i></span>
+                            {% elif n.kind == "request" %}
+                            <span class="text-warning"><i class="ti ti-clock-question fs-2"></i></span>
+                            {% elif n.kind == "settled" %}
+                            <span class="text-success"><i class="ti ti-check fs-2"></i></span>
+                            {% else %}
+                            <span class="text-primary"><i class="ti ti-id-badge fs-2"></i></span>
+                            {% endif %}
+                        </div>
+
+                        <div class="col">
+                            <div class="fw-medium">{{ n.title }}</div>
+                            {% if n.body %}
+                            <div class="text-secondary small">{{ n.body }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="col-auto text-secondary text-nowrap small">
+                            {{ n.created_at|timesince }} ago
+                        </div>
+
+                        <div class="col-auto">
+                            {% if not n.is_read %}
+                            <form method="post"
+                                  action="{% url 'account:notification_mark_read' n.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-icon btn-ghost-secondary"
+                                        aria-label="Mark as read">
+                                    <i class="ti ti-check"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="card-body">
+                <div class="empty">
+                    <div class="empty-icon text-secondary"><i class="ti ti-bell fs-1"></i></div>
+                    <p class="empty-title">No notifications yet</p>
+                    <p class="empty-subtitle text-secondary">
+                        Money events on your account will appear here.
+                    </p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ========================= Row 3: pagination ======================== -->
+{% if page_obj.has_other_pages %}
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="d-flex align-items-center justify-content-between">
+            <div class="text-secondary small">
+                Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+            </div>
+            <ul class="pagination m-0">
+                <li class="page-item{% if not page_obj.has_previous %} disabled{% endif %}">
+                    {% if page_obj.has_previous %}
+                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+                    {% else %}
+                    <span class="page-link">Previous</span>
+                    {% endif %}
+                </li>
+                <li class="page-item{% if not page_obj.has_next %} disabled{% endif %}">
+                    {% if page_obj.has_next %}
+                    <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
+                    {% else %}
+                    <span class="page-link">Next</span>
+                    {% endif %}
+                </li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock content %}

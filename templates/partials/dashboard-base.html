@@ -1,4 +1,4 @@
-{% load static %}
+{% load static notification_extras %}
 <!doctype html>
 <html lang="en" data-bs-theme="light">
 
@@ -192,6 +192,38 @@
                             <a class="nav-link" href="/admin">Admin</a>
                         </div>
                         {% endif %}
+
+                        {# Money-event notifications (Phase 5g-2). The tags come
+                           from account/templatetags/notification_extras.py and
+                           return empty values for an anonymous visitor. #}
+                        <div class="nav-item dropdown">
+                            <a href="#" class="nav-link px-0" data-bs-toggle="dropdown"
+                               aria-label="Notifications" role="button">
+                                <i class="ti ti-bell"></i>
+                                {% unread_notification_count request.user as unread %}
+                                {% if unread %}
+                                <span class="badge bg-red text-white badge-notification badge-pill">{{ unread }}</span>
+                                {% endif %}
+                            </a>
+                            <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+                                <span class="dropdown-header">Notifications</span>
+                                {% recent_notifications request.user 5 as recent %}
+                                {% for n in recent %}
+                                <a href="{% notification_url n.link %}"
+                                   class="dropdown-item{% if not n.is_read %} bg-blue-lt{% endif %}">
+                                    <div class="fw-medium">{{ n.title }}</div>
+                                    <div class="text-secondary small">{{ n.created_at|timesince }} ago</div>
+                                </a>
+                                {% empty %}
+                                <span class="dropdown-item text-secondary">No notifications yet.</span>
+                                {% endfor %}
+                                <div class="dropdown-divider"></div>
+                                <a href="{% url 'account:notifications' %}" class="dropdown-item text-center">
+                                    View all notifications
+                                </a>
+                            </div>
+                        </div>
+
                         <div class="nav-item">
                             <button type="button" class="btn btn-ghost-secondary btn-icon"
                                     id="ob-theme-toggle" aria-label="Toggle theme">
