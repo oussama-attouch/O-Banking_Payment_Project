@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from account import analytics
 from account.models import KYC, Account
-from account.forms import KYCForm
+from account.forms import KYCForm, ProfileForm
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 
@@ -182,3 +182,45 @@ def kyc_registration(request):
     }
     # Render the 'kyc-form.html' template with the provided context
     return render(request, "account/kyc-form.html", context)
+
+
+# =====================================================================
+# Phase 5d  user settings
+# =====================================================================
+@login_required
+def settings_view(request):
+    """Profile and credentials for the signed-in user.
+
+    Deliberately *not* behind ``_kyc_required``: that gate guards the dashboard's
+    banking data, while a user who has not filed KYC yet -- or who needs to fix a
+    typo in the name they are about to file -- must still reach their own
+    settings. Only the login gate applies.
+
+    Editing ``email`` changes the sign-in address, because
+    ``userauths.User.USERNAME_FIELD`` is ``email``; the template says so next to
+    the field. Changing a *password* is not done here at all -- that is
+    ``account:password_change``, which asks for the current password.
+    """
+    # Every User is provisioned with an Account by the post_save receiver in
+    # account.models, but this page only reads a few of its columns, so a missing
+    # row degrades to "no account details" instead of a 500. Both relations are
+    # reverse one-to-ones: their DoesNotExist subclasses AttributeError, which is
+    # why getattr's default is reached rather than raised.
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    if request.method == "POST":
+        profile_form = ProfileForm(request.POST, instance=request.user)
+        if profile_form.is_valid():
+            profile_form.save()
+            messages.success(request, "Your profile has been updated.")
+            return redirect("account:settings")
+    else:
+        profile_form = ProfileForm(instance=request.user)
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "profile_form": profile_form,
+    }
+    return render(request, "account/settings.html", context)

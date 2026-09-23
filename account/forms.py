@@ -1,6 +1,8 @@
 from django import forms 
+from django.contrib.auth.forms import PasswordChangeForm
 from account.models import KYC
 from django.forms import ImageField, FileInput, DateInput
+from userauths.models import User
 
 class DateInput(forms.DateInput):
     input_type = 'date'
@@ -22,3 +24,43 @@ class KYCForm(forms.ModelForm):
             "city": forms.TextInput(attrs={"placeholder":"City"}),
             'date_of_birth':DateInput
         }
+
+
+class ProfileForm(forms.ModelForm):
+    """The three User columns a signed-in user may edit for themselves.
+
+    ``email`` is ``USERNAME_FIELD`` on ``userauths.User`` and the column already
+    carries ``unique=True``, so a clash with another account is caught by the
+    ModelForm's own uniqueness check -- nothing extra is validated here.
+
+    Deliberately no password fields: changing a password goes through
+    ``StyledPasswordChangeForm`` below, which demands the current password.
+    """
+
+    class Meta:
+        model = User
+        fields = ["first_name", "last_name", "email"]
+        # No widget attrs: Django already picks TextInput for the two CharFields
+        # and EmailInput for the EmailField, and the ``form-control`` class is
+        # applied in the template with the project's ``add_class`` filter, which
+        # is how KYCForm and the sign-up form are styled. Declaring the class in
+        # both places would emit ``class="form-control form-control"``, because
+        # the filter appends rather than replaces.
+
+
+class StyledPasswordChangeForm(PasswordChangeForm):
+    """Django's ``PasswordChangeForm`` with Tabler's ``form-control`` applied.
+
+    ``PasswordChangeForm`` is a plain ``Form``, not a ``ModelForm``, so it has no
+    ``Meta.widgets`` to declare the class in. Setting it here keeps the template
+    free of per-field filter calls and keeps every widget in step if Django ever
+    adds a field to the form.
+
+    Everything else -- checking the current password, running the configured
+    validators, refusing a reused password -- is Django's own behaviour.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")

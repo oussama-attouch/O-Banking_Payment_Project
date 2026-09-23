@@ -665,3 +665,117 @@ class KPIDeltaTests(DashboardAnalyticsTestBase):
             "get_kpi_deltas used %d queries, budget is 4" % len(captured),
         )
         self.assertEqual(len(captured), 3, "implementation detail moved")
+
+
+# =====================================================================
+# Phase 5d  user settings
+# =====================================================================
+class SettingsTests(TestCase):
+    """The self-service settings screen: profile edit and password change.
+
+    Settings is deliberately *not* KYC-gated -- only ``login_required`` -- so
+    the user without a KYC row below is expected to get a 200, not a redirect.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
+
+    def setUp(self):
+        # No KYC row on purpose: settings must stay reachable without one.
+        self.user = User.objects.create_user(
+            username="setter", email="setter@test.invalid", password=PASSWORD
+        )
+        self.account = Account.objects.get(user=self.user)
+        self.client.force_login(self.user)
+
+    # ------------------------------------------------------------- page
+    def test_settings_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("account:settings"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+        self.assertIn("next=", resp["Location"])
+
+    def test_settings_renders_for_authenticated(self):
+        """A KYC-less user still gets the page, and it shows both cards."""
+        resp = self.client.get(reverse("account:settings"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Profile")
+        self.assertContains(resp, "Account overview")
+        self.assertContains(resp, "KYC status")
+        self.assertContains(resp, self.account.account_number)
+
+    # ---------------------------------------------------------- profile
+    def test_settings_profile_update(self):
+        resp = self.client.post(
+            reverse("account:settings"),
+            {"first_name": "Test", "last_name": "User", "email": "test@example.com"},
+        )
+        self.assertRedirects(resp, reverse("account:settings"))
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Test")
+        self.assertEqual(self.user.last_name, "User")
+        self.assertEqual(self.user.email, "test@example.com")
+
+    def test_settings_email_collision_rejected(self):
+        """email is USERNAME_FIELD, so it must stay unique across accounts."""
+        User.objects.create_user(
+            username="taken", email="taken@test.invalid", password=PASSWORD
+        )
+        resp = self.client.post(
+            reverse("account:settings"),
+            {"first_name": "Test", "last_name": "User", "email": "taken@test.invalid"},
+        )
+        self.assertEqual(resp.status_code, 200, "a rejected save must re-render the page")
+        self.assertContains(resp, "already exists")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "setter@test.invalid")
+        self.assertEqual(self.user.first_name, "", "nothing may be saved on a collision")
+
+    # --------------------------------------------------------- password
+    def test_password_change_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("account:password_change"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_password_change_updates_password(self):
+        new_password = "Phase-5d-brand-new-pw"
+        resp = self.client.post(
+            reverse("account:password_change"),
+            {
+                "old_password": PASSWORD,
+                "new_password1": new_password,
+                "new_password2": new_password,
+            },
+        )
+        self.assertRedirects(resp, reverse("account:settings"))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(new_password))
+
+    def test_password_change_rejects_wrong_old(self):
+        new_password = "Phase-5d-brand-new-pw"
+        resp = self.client.post(
+            reverse("account:password_change"),
+            {
+                "old_password": "not-the-current-password",
+                "new_password1": new_password,
+                "new_password2": new_password,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(PASSWORD))
+        self.assertFalse(self.user.check_password(new_password))

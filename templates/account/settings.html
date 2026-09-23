@@ -1,0 +1,170 @@
+{% extends "partials/dashboard-base.html" %}
+{% load form_extras %}
+
+{% block title %}Settings &middot; O-Banking{% endblock %}
+
+{% block content %}
+
+<!-- ========================= Row 1: header ============================ -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="h3 mb-1">Settings</h2>
+                <div class="text-secondary">Manage your profile and account credentials.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Deliberately a plain .row, like account.html on the dashboard shell:
+     .row-deck would make each column a row-direction flex container and lay the
+     two stacked cards inside a column out side by side. -->
+<div class="row">
+
+    <!-- ================== Left: account and KYC state ================== -->
+    <div class="col-lg-4">
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Account overview</h2>
+            </div>
+
+            {% if account %}
+            <div class="list-group list-group-flush">
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span class="text-secondary">Account number</span>
+                    <span>{{ account.account_number }}</span>
+                </div>
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span class="text-secondary">Account ID</span>
+                    <span>{{ account.account_id }}</span>
+                </div>
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span class="text-secondary">Joined</span>
+                    <span>{{ account.date|date:"F j, Y" }}</span>
+                </div>
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span class="text-secondary">Status</span>
+                    {% if account.account_status == "active" %}
+                    <span class="badge bg-green-lt">Active</span>
+                    {% elif account.account_status == "in-review" %}
+                    <span class="badge bg-yellow-lt">In Review</span>
+                    {% else %}
+                    <span class="badge bg-secondary-lt">{{ account.account_status|title }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% else %}
+            <div class="card-body text-secondary">
+                No account details are on file for this login.
+            </div>
+            {% endif %}
+        </div>
+
+        {# Same three states, percentages and wording as the dashboard strip. #}
+        <div class="card mt-3">
+            <div class="card-header">
+                <h2 class="card-title">KYC status</h2>
+                {% if account.kyc_confirmed %}
+                <span class="badge bg-green-lt ms-auto">Verified</span>
+                {% elif kyc or account.kyc_submitted %}
+                <span class="badge bg-blue-lt ms-auto">Pending review</span>
+                {% else %}
+                <span class="badge bg-secondary-lt ms-auto">Not submitted</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <div class="progress progress-sm mb-3">
+                    <div class="progress-bar"
+                         style="width: {% if account.kyc_confirmed %}100{% elif kyc or account.kyc_submitted %}50{% else %}0{% endif %}%"
+                         role="progressbar"
+                         aria-valuenow="{% if account.kyc_confirmed %}100{% elif kyc or account.kyc_submitted %}50{% else %}0{% endif %}"
+                         aria-valuemin="0" aria-valuemax="100" aria-label="KYC progress"></div>
+                </div>
+                <p class="text-secondary mb-0">
+                    {% if account.kyc_confirmed %}
+                    Your identity has been confirmed. Nothing further is needed.
+                    {% elif kyc or account.kyc_submitted %}
+                    Your details are on file and are awaiting review.
+                    {% else %}
+                    No identity details are on file yet.
+                    {% endif %}
+                </p>
+                <a href="{% url 'account:kyc-reg' %}" class="btn btn-outline-secondary mt-3">
+                    {% if kyc %}Update KYC{% else %}Submit KYC{% endif %}
+                </a>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ======================= Right: profile ========================== -->
+    <div class="col-lg-8">
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Profile</h2>
+            </div>
+
+            <form method="post" action="{% url 'account:settings' %}" novalidate>
+                {% csrf_token %}
+                <div class="card-body">
+
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ profile_form.first_name.id_for_label }}">First name</label>
+                        {{ profile_form.first_name|add_class:"form-control" }}
+                        {% if profile_form.first_name.help_text %}
+                        <small class="form-hint">{{ profile_form.first_name.help_text }}</small>
+                        {% endif %}
+                        {% if profile_form.first_name.errors %}
+                        <div class="text-danger small mt-1">{{ profile_form.first_name.errors }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ profile_form.last_name.id_for_label }}">Last name</label>
+                        {{ profile_form.last_name|add_class:"form-control" }}
+                        {% if profile_form.last_name.help_text %}
+                        <small class="form-hint">{{ profile_form.last_name.help_text }}</small>
+                        {% endif %}
+                        {% if profile_form.last_name.errors %}
+                        <div class="text-danger small mt-1">{{ profile_form.last_name.errors }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-0">
+                        <label class="form-label" for="{{ profile_form.email.id_for_label }}">Email address</label>
+                        {{ profile_form.email|add_class:"form-control" }}
+                        <small class="form-hint">
+                            Changing your email changes the address you log in with.
+                        </small>
+                        {% if profile_form.email.errors %}
+                        <div class="text-danger small mt-1">{{ profile_form.email.errors }}</div>
+                        {% endif %}
+                    </div>
+
+                </div>
+
+                <div class="card-footer text-end">
+                    <button type="submit" class="btn btn-primary">Save changes</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card mt-3">
+            <div class="card-header">
+                <h2 class="card-title">Password</h2>
+            </div>
+            <div class="card-body">
+                <a href="{% url 'account:password_change' %}" class="btn btn-outline-secondary">
+                    Change password
+                </a>
+                <div class="form-hint mt-2">You will be asked to re-enter your current password.</div>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock content %}
