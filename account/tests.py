@@ -1113,3 +1113,181 @@ class RecipientTests(TestCase):
         recipient = Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
         self.bob.delete()
         self.assertFalse(Recipient.objects.filter(pk=recipient.pk).exists())
+
+
+# =====================================================================
+# Phase 5f-2  recipients page
+# =====================================================================
+class RecipientViewTests(TestCase):
+    """The /account/recipients/ page: list, inline add, POST-only delete."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
+
+    def setUp(self):
+        self.alice, self.alice_acct = self.make_user("pay_alice", kyc=True)
+        self.bob, self.bob_acct = self.make_user("pay_bob", kyc=True)
+        self.carol, self.carol_acct = self.make_user("pay_carol", kyc=False)
+        self.client.force_login(self.bob)
+
+    def make_user(self, name, kyc=True):
+        user = User.objects.create_user(
+            username=name, email="%s@test.invalid" % name, password=PASSWORD
+        )
+        acct = Account.objects.get(user=user)
+        if kyc:
+            KYC.objects.create(
+                user=user,
+                account=acct,
+                full_name="%s Person" % name.title(),
+                nationality="MA",
+                marrital_status="single",
+                gender="male",
+                identity_type="passport",
+                date_of_birth=timezone.now(),
+                signature="kyc/test.png",
+                country="MA",
+                city="Casablanca",
+                state="Casablanca",
+                mobile="0600000000",
+                fax="",
+            )
+        return user, acct
+
+    # -------------------------------------------------------------- page
+    def test_recipients_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("account:recipients"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_recipients_renders_empty_for_new_user(self):
+        resp = self.client.get(reverse("account:recipients"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "No recipients saved yet")
+        self.assertContains(resp, "Add a recipient")
+
+    # --------------------------------------------------------------- add
+    def test_recipients_add_success(self):
+        resp = self.client.post(reverse("account:recipients"), {
+            "account_number": self.alice_acct.account_number,
+            "nickname": "Alice",
+        })
+        self.assertRedirects(resp, reverse("account:recipients"))
+        saved = Recipient.objects.filter(user=self.bob)
+        self.assertEqual(saved.count(), 1)
+        self.assertEqual(saved.first().target_account_id, self.alice_acct.pk)
+        self.assertEqual(saved.first().nickname, "Alice")
+
+    def test_recipients_add_by_account_id(self):
+        resp = self.client.post(reverse("account:recipients"), {
+            "account_number": self.alice_acct.account_id,
+            "nickname": "",
+        })
+        self.assertRedirects(resp, reverse("account:recipients"))
+        self.assertEqual(
+            Recipient.objects.filter(user=self.bob, target_account=self.alice_acct).count(), 1
+        )
+
+    def test_recipients_add_unknown_account_rejected(self):
+        resp = self.client.post(reverse("account:recipients"), {
+            "account_number": "9999999999999",
+            "nickname": "",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "No account matches that number or ID")
+        self.assertEqual(Recipient.objects.filter(user=self.bob).count(), 0)
+
+    def test_recipients_add_self_rejected(self):
+        resp = self.client.post(reverse("account:recipients"), {
+            "account_number": self.bob_acct.account_number,
+            "nickname": "",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "cannot save your own account")
+        self.assertEqual(Recipient.objects.filter(user=self.bob).count(), 0)
+
+    def test_recipients_add_duplicate_rejected(self):
+        Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
+        resp = self.client.post(reverse("account:recipients"), {
+            "account_number": self.alice_acct.account_number,
+            "nickname": "again",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "already saved this account")
+        self.assertEqual(Recipient.objects.filter(user=self.bob).count(), 1)
+
+    def test_recipients_cap_enforced(self):
+        """The 50-per-user cap is a view rule, not a model constraint."""
+        from account.views import MAX_RECIPIENTS_PER_USER
+
+        targets = []
+        for index in range(MAX_RECIPIENTS_PER_USER):
+            # password=None -> set_unusable_password(): these 50 are pure
+            # fixtures that never authenticate. Hashing a password for each of
+            # them costs ~1.7s * 50 on this machine (the suite does not swap in
+            # a fast hasher), for no coverage at all.
+            user = User.objects.create_user(
+                username="cap%d" % index,
+                email="cap%d@test.invalid" % index,
+                password=None,
+            )
+            targets.append(Account.objects.get(user=user))
+        Recipient.objects.bulk_create(
+            [Recipient(user=self.bob, target_account=acct) for acct in targets]
+        )
+        self.assertEqual(
+            Recipient.objects.filter(user=self.bob).count(), MAX_RECIPIENTS_PER_USER
+        )
+
+        resp = self.client.post(
+            reverse("account:recipients"),
+            {"account_number": self.alice_acct.account_number, "nickname": "one more"},
+            follow=True,
+        )
+        self.assertContains(resp, "at most %d recipients" % MAX_RECIPIENTS_PER_USER)
+        self.assertEqual(
+            Recipient.objects.filter(user=self.bob).count(), MAX_RECIPIENTS_PER_USER
+        )
+        self.assertFalse(
+            Recipient.objects.filter(user=self.bob, target_account=self.alice_acct).exists()
+        )
+
+    # ------------------------------------------------------------ delete
+    def test_recipients_delete_requires_post(self):
+        recipient = Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
+        resp = self.client.get(
+            reverse("account:recipient_delete", args=[recipient.pk])
+        )
+        self.assertEqual(resp.status_code, 405)
+        self.assertTrue(Recipient.objects.filter(pk=recipient.pk).exists())
+
+    def test_recipients_delete_own_recipient(self):
+        recipient = Recipient.objects.create(user=self.bob, target_account=self.alice_acct)
+        resp = self.client.post(
+            reverse("account:recipient_delete", args=[recipient.pk])
+        )
+        self.assertRedirects(resp, reverse("account:recipients"))
+        self.assertFalse(Recipient.objects.filter(pk=recipient.pk).exists())
+
+    def test_recipients_delete_other_users_recipient_is_noop(self):
+        """alice's saved payee must survive bob posting its delete URL."""
+        recipient = Recipient.objects.create(user=self.alice, target_account=self.carol_acct)
+        resp = self.client.post(
+            reverse("account:recipient_delete", args=[recipient.pk]),
+            follow=True,
+        )
+        self.assertContains(resp, "Recipient not found.")
+        self.assertTrue(Recipient.objects.filter(pk=recipient.pk).exists())

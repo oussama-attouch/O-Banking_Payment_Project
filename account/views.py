@@ -7,10 +7,11 @@ from django.db.models.functions import TruncMonth
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from account import analytics
-from account.models import KYC, Account
-from account.forms import KYCForm, ProfileForm
+from account.models import KYC, Account, Recipient
+from account.forms import KYCForm, ProfileForm, RecipientForm
 from core.models import Transaction
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -559,3 +560,90 @@ def export_csv(request):
         ])
 
     return response
+
+
+# =====================================================================
+# Phase 5f-2  saved payees
+# =====================================================================
+#: Hard cap per user. A view-level rule, not a model constraint: a constraint
+#: cannot express "no more than N", and the view can explain the refusal.
+MAX_RECIPIENTS_PER_USER = 50
+
+
+@login_required
+def recipients_view(request):
+    """List the current user's saved recipients.
+
+    The add form is rendered inline on the same page, so adding is a POST to
+    this view rather than to a separate one. Login-only like ``account:settings``
+    -- a saved payee list is the user's own address book, not banking data.
+    """
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    if request.method == "POST":
+        if Recipient.objects.filter(user=request.user).count() >= MAX_RECIPIENTS_PER_USER:
+            messages.warning(request,
+                f"You can save at most {MAX_RECIPIENTS_PER_USER} recipients. "
+                "Delete one before adding another.")
+            return redirect("account:recipients")
+
+        form = RecipientForm(request.POST)
+        if form.is_valid():
+            raw = form.cleaned_data["account_number"]
+            # accept either account_number or account_id
+            target = (Account.objects
+                      .filter(account_number=raw).first()
+                      or Account.objects.filter(account_id=raw).first())
+            if target is None:
+                form.add_error("account_number",
+                    "No account matches that number or ID on this installation.")
+            elif target.user_id == request.user.id:
+                form.add_error("account_number",
+                    "You cannot save your own account as a recipient.")
+            elif Recipient.objects.filter(user=request.user, target_account=target).exists():
+                form.add_error("account_number",
+                    "You have already saved this account.")
+            else:
+                Recipient.objects.create(
+                    user=request.user,
+                    target_account=target,
+                    nickname=form.cleaned_data.get("nickname", "").strip(),
+                )
+                messages.success(request, "Recipient saved.")
+                return redirect("account:recipients")
+    else:
+        form = RecipientForm()
+
+    recipients = (Recipient.objects
+                  .filter(user=request.user)
+                  .select_related("target_account__user", "target_account__user__kyc"))
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "form": form,
+        "recipients": recipients,
+        "max_recipients": MAX_RECIPIENTS_PER_USER,
+    }
+    return render(request, "account/recipients.html", context)
+
+
+@login_required
+@require_POST
+def recipient_delete(request, pk):
+    """Delete one of the current user's recipients. POST only.
+
+    ``login_required`` sits outside ``require_POST`` on purpose: an anonymous
+    GET is a sign-in redirect, an authenticated GET is a 405. The queryset is
+    scoped to ``request.user``, so another user's pk is simply "not found"
+    rather than a permission error that would confirm the row exists.
+    """
+    recipient = Recipient.objects.filter(pk=pk, user=request.user).first()
+    if recipient is None:
+        messages.warning(request, "Recipient not found.")
+        return redirect("account:recipients")
+    label = recipient.display_name
+    recipient.delete()
+    messages.success(request, f"Removed {label}.")
+    return redirect("account:recipients")

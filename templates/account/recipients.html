@@ -1,0 +1,147 @@
+{% extends "partials/dashboard-base.html" %}
+
+{% block title %}Recipients &middot; O-Banking{% endblock %}
+
+{% block content %}
+
+<!-- ========================= Row 1: header ============================ -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <h2 class="h3 mb-1">Recipients</h2>
+                        <div class="text-secondary">
+                            Saved payees for one-click transfers. You can save up to {{ max_recipients }}.
+                        </div>
+                    </div>
+                    <span class="badge bg-blue-lt">{{ recipients|length }} of {{ max_recipients }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+
+    <!-- ==================== Left: add a recipient ====================== -->
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Add a recipient</h2>
+            </div>
+
+            <form method="post" action="{% url 'account:recipients' %}" novalidate>
+                {% csrf_token %}
+                <div class="card-body">
+
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.account_number.id_for_label }}">
+                            {{ form.account_number.label }}
+                        </label>
+                        {{ form.account_number }}
+                        {% if form.account_number.help_text %}
+                        <small class="form-hint">{{ form.account_number.help_text }}</small>
+                        {% endif %}
+                        {% if form.account_number.errors %}
+                        <div class="text-danger small mt-1">{{ form.account_number.errors }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-0">
+                        <label class="form-label" for="{{ form.nickname.id_for_label }}">
+                            {{ form.nickname.label }}
+                        </label>
+                        {{ form.nickname }}
+                        {% if form.nickname.help_text %}
+                        <small class="form-hint">{{ form.nickname.help_text }}</small>
+                        {% endif %}
+                        {% if form.nickname.errors %}
+                        <div class="text-danger small mt-1">{{ form.nickname.errors }}</div>
+                        {% endif %}
+                    </div>
+
+                </div>
+
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary w-100">Save recipient</button>
+                    <div class="text-secondary small mt-2">
+                        The account holder does not need to approve this &mdash; you are the only one who sees it.
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- =================== Right: saved recipients ===================== -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Saved recipients</h2>
+            </div>
+
+            {% if recipients %}
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Account no</th>
+                            <th>Added</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for recipient in recipients %}
+                        <tr>
+                            <td>
+                                <div>{{ recipient.display_name }}</div>
+                                {% if recipient.nickname %}
+                                {# The nickname hides the real name, so show it here to disambiguate. #}
+                                <div class="text-secondary small">
+                                    {{ recipient.target_account.user.kyc.full_name|default:recipient.target_account.user.username }}
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div>{{ recipient.target_account.account_number }}</div>
+                                <div class="text-secondary small">{{ recipient.target_account.account_id }}</div>
+                            </td>
+                            <td class="text-secondary text-nowrap">{{ recipient.created_at|date:"M j, Y" }}</td>
+                            <td class="text-end">
+                                <a class="btn btn-sm btn-primary"
+                                   href="{% url 'core:amount-transfer' recipient.target_account.account_number %}">
+                                    <i class="ti ti-send"></i> Send
+                                </a>
+                                <form method="post"
+                                      action="{% url 'account:recipient_delete' recipient.pk %}"
+                                      class="d-inline">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <i class="ti ti-trash"></i> Remove
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card-body">
+                <div class="empty">
+                    <div class="empty-icon text-secondary"><i class="ti ti-users fs-1"></i></div>
+                    <p class="empty-title">No recipients saved yet</p>
+                    <p class="empty-subtitle text-secondary">
+                        Add one using the form on the left, then send money in two clicks.
+                    </p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+
+{% endblock content %}

@@ -31,4 +31,8 @@ urlpatterns = [
     # Phase 5e. The export is the same filtered set as the page, as CSV.
     path("statements/", views.statements_view, name="statements"),
     path("statements/export.csv", views.export_csv, name="statements_export"),
+
+    # Phase 5f-2. The Recipient pk is the default BigAutoField, hence <int:pk>.
+    path("recipients/", views.recipients_view, name="recipients"),
+    path("recipients/<int:pk>/delete/", views.recipient_delete, name="recipient_delete"),
 ]

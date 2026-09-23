@@ -64,3 +64,42 @@ class StyledPasswordChangeForm(PasswordChangeForm):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
+
+
+class RecipientForm(forms.Form):
+    """Save a payee by account number.
+
+    A plain ``Form``, not a ``ModelForm``: the user types an account number (or
+    account ID) string, and the view is what turns it into an ``Account`` row.
+    Every rule that needs the database -- self-save, duplicates, the 50-per-user
+    cap -- belongs to the view, which can say *why* it refused; this form only
+    normalises the two strings.
+    """
+
+    account_number = forms.CharField(
+        max_length=25,
+        widget=forms.TextInput(attrs={
+            "class": "form-control",
+            "placeholder": "Account number or ID",
+            "autocomplete": "off",
+        }),
+        label="Account number or ID",
+        help_text="The 217... account number or DEX... account ID.",
+    )
+    nickname = forms.CharField(
+        max_length=100,
+        required=False,
+        widget=forms.TextInput(attrs={
+            "class": "form-control",
+            "placeholder": "Optional — e.g. 'Alice (work)'",
+            "autocomplete": "off",
+        }),
+        label="Nickname",
+        help_text="If left blank, the account holder's name is used.",
+    )
+
+    def clean_account_number(self):
+        value = (self.cleaned_data.get("account_number") or "").strip()
+        if not value:
+            raise forms.ValidationError("Please enter an account number.")
+        return value
