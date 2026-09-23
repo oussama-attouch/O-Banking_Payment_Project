@@ -122,3 +122,11 @@
   --tblr-border-radius: 8px;
   --tblr-border-radius-lg: 12px;
 }
+
+/* Larger sparkline for the balance hero card. */
+.kpi-sparkline-lg {
+  width: 160px;
+  height: 48px;
+  color: var(--ob-sparkline-stroke);
+  display: block;
+}

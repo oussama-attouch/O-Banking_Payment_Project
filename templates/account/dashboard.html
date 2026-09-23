@@ -6,44 +6,57 @@
 
 {% block content %}
 
-<!-- ============================ Row 1: KPI cards ======================= -->
-<div class="row row-deck row-cards">
-    <div class="col-sm-6 col-lg-3">
+<!-- ======================= Row 1: balance hero ========================= -->
+<div class="row mb-3">
+    <div class="col-12">
         <div class="card">
             <div class="card-body">
-                <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="text-secondary small">Balance</div>
-                    <i class="ti ti-wallet text-secondary"></i>
-                </div>
-                <div class="d-flex align-items-end justify-content-between">
-                    <div>
-                        <div class="h1 mb-0">{{ kpis.balance|intcomma }}</div>
+                <div class="row align-items-center">
+                    <div class="col-lg-7">
+                        <div class="text-secondary small mb-2">Available balance</div>
+                        <div class="display-4 fw-bold mb-3">{{ kpis.balance|intcomma }}</div>
 {% with delta=kpi_deltas.balance %}
 {% if delta.delta_pct is not None %}
                         <span class="kpi-delta {% if delta.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
                             {% if delta.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
-                            {{ delta.delta_pct }}%
+                            {{ delta.delta_pct }}% vs 30 days ago
                         </span>
 {% else %}
-                        <span class="text-secondary small">no comparison</span>
+                        <span class="text-secondary small">No comparison yet</span>
 {% endif %}
 {% endwith %}
                     </div>
+                    <div class="col-lg-5 text-lg-end mt-4 mt-lg-0">
 {% with delta=kpi_deltas.balance %}
-                    {% if delta.sparkline_points %}
-                    <svg class="kpi-sparkline" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
-                        <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
-                                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                    {% endif %}
+                        {% if delta.sparkline_points %}
+                        <svg class="kpi-sparkline-lg ms-lg-auto" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true">
+                            <polyline points="{{ delta.sparkline_points }}" fill="none" stroke="currentColor"
+                                      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        {% endif %}
 {% endwith %}
+                    </div>
                 </div>
-                <div class="text-secondary small mt-1">Point in time</div>
+                <div class="btn-list mt-4">
+                    <a href="{% url 'core:search-account' %}" class="btn btn-primary">
+                        <i class="ti ti-send me-1"></i> Send money
+                    </a>
+                    <a href="{% url 'core:request-search-account' %}" class="btn btn-outline-primary">
+                        <i class="ti ti-inbox me-1"></i> Request payment
+                    </a>
+                    <a href="{% url 'core:transactions' %}" class="btn btn-outline-secondary">
+                        <i class="ti ti-list-details me-1"></i> View history
+                    </a>
+                </div>
             </div>
         </div>
     </div>
+</div>
 
-    <div class="col-sm-6 col-lg-3">
+<!-- ========================= Row 2: KPI cards ========================== -->
+<div class="row row-deck row-cards">
+
+    <div class="col-6 col-md-3">
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -78,7 +91,7 @@
         </div>
     </div>
 
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-6 col-md-3">
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -113,7 +126,7 @@
         </div>
     </div>
 
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-6 col-md-3">
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -148,7 +161,7 @@
         </div>
     </div>
 
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-6 col-md-3">
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -183,7 +196,7 @@
         </div>
     </div>
 
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-6 col-md-3">
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -218,7 +231,7 @@
         </div>
     </div>
 
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-6 col-md-3">
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -253,7 +266,7 @@
         </div>
     </div>
 
-    <div class="col-sm-6 col-lg-3">
+    <div class="col-6 col-md-3">
         <div class="card">
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between mb-2">
@@ -273,7 +286,7 @@
     </div>
 
 </div>
-<!-- ============================== Row 2: charts ======================== -->
+<!-- ============================== Row 3: charts ======================== -->
 <div id="charts-empty" class="card mt-3 d-none">
     <div class="card-body">
         <div class="empty">
@@ -339,7 +352,7 @@
     </div>
 </div>
 
-<!-- ============================== Row 3: tables ======================== -->
+<!-- ============================== Row 4: tables ======================== -->
 <div class="row row-deck row-cards mt-3">
     <div class="col-lg-6">
         <div class="card">
@@ -430,7 +443,7 @@
     </div>
 </div>
 
-<!-- ======================= Row 4: transaction history ================== -->
+<!-- ======================= Row 5: transaction history ================== -->
 <div class="card mt-3">
     <div class="card-header">
         <h3 class="card-title">Transaction history</h3>
@@ -542,27 +555,8 @@
     {% endif %}
 </div>
 
-<!-- ==================== Row 5: quick actions + KYC ===================== -->
+<!-- ========================== Row 6: KYC status ======================== -->
 <div class="row row-deck row-cards mt-3">
-    <div class="col-lg-6">
-        <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Quick actions</h3>
-            </div>
-            <div class="card-body d-flex flex-wrap gap-2">
-                <a href="{% url 'core:search-account' %}" class="btn btn-primary">
-                    <i class="ti ti-send me-1"></i> Send money
-                </a>
-                <a href="{% url 'core:request-search-account' %}" class="btn btn-outline-secondary">
-                    <i class="ti ti-download me-1"></i> Request payment
-                </a>
-                <a href="{% url 'core:transactions' %}" class="btn btn-outline-secondary">
-                    <i class="ti ti-list-details me-1"></i> View all transactions
-                </a>
-            </div>
-        </div>
-    </div>
-
     <div class="col-lg-6">
         <div class="card">
             <div class="card-header">
