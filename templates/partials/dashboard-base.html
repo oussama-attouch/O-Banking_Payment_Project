@@ -199,9 +199,11 @@
                         </div>
                         {% endif %}
 
-                        {# Money-event notifications (Phase 5g-2). The tags come
-                           from account/templatetags/notification_extras.py and
-                           return empty values for an anonymous visitor. #}
+                        {% comment %}
+                        Money-event notifications (Phase 5g-2). The tags come from
+                        account/templatetags/notification_extras.py and return empty
+                        values for an anonymous visitor.
+                        {% endcomment %}
                         <div class="nav-item dropdown">
                             <a href="#" class="nav-link px-0" data-bs-toggle="dropdown"
                                aria-label="Notifications" role="button">

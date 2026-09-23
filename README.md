@@ -145,7 +145,7 @@ One notification is created per state transition, by comparing the status captur
 Prerequisites: Python 3.12 and Git.
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/YOUR-USERNAME/o-banking.git
 cd o-banking
 py -3.12 -m venv venv
 .\venv\Scripts\pip install -r requirements.txt
@@ -227,8 +227,8 @@ The audit and modernization ran as a numbered phase sequence — from the securi
 Oussama Attouch
 
 ```
-GitHub:   github.com/your-handle
-LinkedIn: linkedin.com/in/your-handle
+GitHub:   github.com/oussama-attouch
+LinkedIn: linkedin.com/in/https://www.linkedin.com/in/oussama-attouch-bb1558261/
 ```
 
 Released under the MIT License. See [LICENSE](LICENSE).
