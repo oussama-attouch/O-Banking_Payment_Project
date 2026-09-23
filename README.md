@@ -2,13 +2,14 @@
 
 A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively-licensed UI.
 
-`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `162 tests passing`
+`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `172 tests passing`
 
 ## Table of contents
 
 - [Context](#context)
 - [Problem Statement](#problem-statement)
 - [Solution Overview](#solution-overview)
+- [Screenshots](#screenshots)
 - [Architecture](#architecture)
 - [Key Features](#key-features)
 - [Technical Stack](#technical-stack)
@@ -38,13 +39,41 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 ## Solution Overview
 
-**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 162 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
+**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 172 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
 **Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports: Django, django-jazzmin, django-import-export, shortuuid, and Pillow.
 
 **UI migration.** The original theme was replaced by Tabler 1.5.1 (MIT), vendored as prebuilt files so the application runs offline. `static/` went from 13.99 MB across 206 files to 2.38 MB across 11. A purple-accent design layer with dark mode lives in one stylesheet, `static/tabler/css/ob-theme.css`.
 
 **Demo data and features.** A `seed_demo` command generates 150 users and 3,000 transactions over 24 months, with balances replayed to match. Five feature areas were then built on top: statements with CSV export, saved recipients, a notification center, a support ticket system, and a user settings page.
+
+## Screenshots
+
+### Dashboard
+
+| Light mode | Dark mode |
+| --- | --- |
+| ![Dashboard light mode](docs/screenshots/dashboard/dashboard-light.png) | ![Dashboard dark mode](docs/screenshots/dashboard/dashboard-dark.png) |
+
+8 KPIs, 4 charts, 2 summary tables, and a paginated transaction history. A single period-and-type filter bar (7 days / 30 days / 90 days / 1 year / All time · All types / Transfers / Requests) recomputes every KPI and every chart from the same query parameters.
+
+### Banking
+
+| Transactions | Account |
+| --- | --- |
+| ![Transactions](docs/screenshots/banking/transactions.png) | ![Account profile](docs/screenshots/banking/account.png) |
+
+| Statements | Recipients |
+| --- | --- |
+| ![Statements](docs/screenshots/banking/statements.png) | ![Recipients](docs/screenshots/banking/recipients.png) |
+
+### Public
+
+| Landing | Sign in |
+| --- | --- |
+| ![Landing page](docs/screenshots/marketing/landing.png) | ![Sign in](docs/screenshots/auth/sign-in.png) |
+
+Additional screenshots — sign-up, the dashboard charts and history in isolation, transfer completion, settings, and a support ticket thread — are kept in [`docs/screenshots/`](docs/screenshots/).
 
 ## Architecture
 
@@ -68,6 +97,7 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 - Transfers between accounts: password re-entry, atomic, `select_for_update`, URL/transaction mismatch guard
 - Payment requests and settlements, with a separate settlement direction rule
 - Dashboard: 8 KPIs, 4 charts, 2 summary tables, and a filtered paginated history
+- Period and type filter bar that recomputes every KPI and every chart from one row of links
 - KPI sparklines, delta chips, and dark mode
 - Statements with a range selector (this month, last 3 months, this year, last 12 months) and CSV export
 - Saved recipients for one-click transfers
@@ -132,7 +162,7 @@ One notification is created per state transition, by comparing the status captur
 
 ## Results
 
-- 162 tests, from 0 (three stubs, four lines)
+- 172 tests, from 0 (three stubs, four lines)
 - `static/` 13.99 MB → 2.38 MB (−83%, 206 files → 11)
 - 7 critical bugs from the original audit closed
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect
@@ -145,8 +175,8 @@ One notification is created per state transition, by comparing the status captur
 Prerequisites: Python 3.12 and Git.
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/o-banking.git
-cd o-banking
+git clone https://github.com/oussama-attouch/O-Banking_Payment_Project.git
+cd O-Banking_Payment_Project
 py -3.12 -m venv venv
 .\venv\Scripts\pip install -r requirements.txt
 $env:DJANGO_DEBUG=1
@@ -191,7 +221,7 @@ account/                     Accounts, KYC, recipients, notifications, support t
 pages/                       Public blog and contact form
 templates/                   All HTML; partials/ holds the two shells
 static/                      Vendored Tabler 1.5.1, Chart.js, and ob-theme.css
-docs/                        Screenshot provenance notes
+docs/                        Screenshot provenance notes and the screenshot library
 venv/                        Virtual environment (gitignored)
 manage.py                    Django management entry point
 requirements.txt             The five runtime dependencies, pinned
@@ -209,9 +239,9 @@ THIRD-PARTY.md               Third-party notices and licence provenance
 
 ## Documentation
 
-Third-party licences and asset provenance are recorded in [THIRD-PARTY.md](THIRD-PARTY.md).
+Third-party licences and asset provenance are recorded in [THIRD-PARTY.md](./THIRD-PARTY.md). The full screenshot library lives in [`docs/screenshots/`](docs/screenshots/) with provenance notes in [`docs/README.md`](docs/README.md).
 
-The audit and modernization ran as a numbered phase sequence — from the security fixes in Phase 1 through the support ticket UI in Phase 5h, with Phase 6 for this documentation. Each phase is a commit; the full sequence is in the commit log.
+The audit and modernization ran as a numbered phase sequence — from the security fixes in Phase 1 through the dashboard filters in Phase 7c, with Phase 6 for the initial documentation. Each phase is a commit; the full sequence is in the commit log.
 
 ## Future Work
 
@@ -224,11 +254,9 @@ The audit and modernization ran as a numbered phase sequence — from the securi
 
 ## Author
 
-Oussama Attouch
+**Oussama Attouch**
 
-```
-GitHub:   github.com/oussama-attouch
-LinkedIn: linkedin.com/in/https://www.linkedin.com/in/oussama-attouch-bb1558261/
-```
+- GitHub: [github.com/oussama-attouch](https://github.com/oussama-attouch)
+- LinkedIn: [linkedin.com/in/oussama-attouch-bb1558261](https://www.linkedin.com/in/oussama-attouch-bb1558261/)
 
-Released under the MIT License. See [LICENSE](LICENSE).
+Released under the MIT License. See [LICENSE](./LICENSE).
