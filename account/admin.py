@@ -1,5 +1,5 @@
 from django.contrib import admin
-from account.models import Account, KYC, Recipient, Notification
+from account.models import Account, KYC, Recipient, Notification, SupportReply, SupportTicket
 from userauths.models import User
 from import_export.admin import ImportExportModelAdmin
 
@@ -76,3 +76,48 @@ class NotificationAdmin(ImportExportModelAdmin):
 
 # Register the Notification model with the custom admin class
 admin.site.register(Notification, NotificationAdmin)
+
+
+# In-app support (Phase 5h-1). Tickets are opened by users in the app and
+# answered by staff here; there is no email path, so the admin is where a
+# reply is written. autocomplete_fields needs search_fields on both referenced
+# admins: UserAdmin defines ('username', 'first_name', 'last_name', 'email'),
+# and SupportTicketAdmin defines its own for SupportReply.ticket.
+class SupportReplyInline(admin.TabularInline):
+    model = SupportReply
+    extra = 1
+    fields = ["author", "body", "created_at"]
+    readonly_fields = ["created_at"]
+    autocomplete_fields = ["author"]
+
+
+class SupportTicketAdmin(ImportExportModelAdmin):
+    list_display = ["id", "user", "subject", "status", "priority",
+                    "updated_at"]
+    list_filter = ["status", "priority", "created_at"]
+    search_fields = [
+        "user__username", "user__email",
+        "subject",
+        "replies__body",
+    ]
+    readonly_fields = ["created_at", "updated_at"]
+    autocomplete_fields = ["user"]
+    inlines = [SupportReplyInline]
+
+
+# Register the SupportTicket model with the custom admin class
+admin.site.register(SupportTicket, SupportTicketAdmin)
+
+
+class SupportReplyAdmin(ImportExportModelAdmin):
+    list_display = ["id", "ticket", "author", "created_at"]
+    list_filter = ["created_at"]
+    search_fields = ["ticket__subject", "author__username",
+                     "author__email", "body"]
+    readonly_fields = ["created_at"]
+    autocomplete_fields = ["ticket", "author"]
+
+
+# Register the SupportReply model standalone too, so a reply can be edited
+# directly without going through its ticket's change form.
+admin.site.register(SupportReply, SupportReplyAdmin)

@@ -12,6 +12,7 @@ from decimal import Decimal
 from io import BytesIO, StringIO
 import csv
 import re
+import time
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -23,7 +24,14 @@ from django.utils import timezone
 from PIL import Image
 
 from account import analytics
-from account.models import Account, KYC, Recipient, Notification
+from account.models import (
+    Account,
+    KYC,
+    Notification,
+    Recipient,
+    SupportReply,
+    SupportTicket,
+)
 from core.models import Transaction
 from userauths.models import User
 
@@ -1566,3 +1574,131 @@ class NotificationViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "ti-bell")
         self.assertNotContains(resp, "badge-notification")
+
+
+# =====================================================================
+# Phase 5h-1  support tickets
+# =====================================================================
+class SupportTests(TestCase):
+    """The SupportTicket / SupportReply models.
+
+    Pure-ORM tests: Phase 5h-2 adds the views and the template, so there is
+    no client here.
+    """
+
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="sup_alice", email="sup_alice@test.invalid", password=PASSWORD
+        )
+        self.staff = User.objects.create_user(
+            username="sup_staff",
+            email="sup_staff@test.invalid",
+            password=PASSWORD,
+            is_staff=True,
+        )
+
+    def make_ticket(self, **kwargs):
+        kwargs.setdefault("user", self.alice)
+        kwargs.setdefault("subject", "Card declined")
+        return SupportTicket.objects.create(**kwargs)
+
+    # ------------------------------------------------------------- the ticket
+    def test_support_ticket_can_be_created(self):
+        ticket = self.make_ticket()
+        self.assertTrue(SupportTicket.objects.filter(pk=ticket.pk).exists())
+        self.assertEqual(ticket.status, SupportTicket.STATUS_OPEN)
+        self.assertEqual(ticket.priority, SupportTicket.PRIORITY_NORMAL)
+
+    def test_support_ticket_str(self):
+        ticket = self.make_ticket(subject="Card declined")
+        self.assertTrue(str(ticket).startswith("#%d " % ticket.pk), str(ticket))
+        self.assertEqual(str(ticket), "#%d Card declined" % ticket.pk)
+
+    def test_support_ticket_is_open_property(self):
+        ticket = self.make_ticket()
+        for status, expected in [
+            (SupportTicket.STATUS_OPEN, True),
+            (SupportTicket.STATUS_IN_PROGRESS, True),
+            (SupportTicket.STATUS_RESOLVED, False),
+            (SupportTicket.STATUS_CLOSED, False),
+        ]:
+            ticket.status = status
+            self.assertIs(ticket.is_open, expected, status)
+
+    # -------------------------------------------------------------- replies
+    def test_support_reply_can_be_created(self):
+        ticket = self.make_ticket()
+        reply = SupportReply.objects.create(
+            ticket=ticket, author=self.staff, body="Looking into it."
+        )
+        self.assertTrue(SupportReply.objects.filter(pk=reply.pk).exists())
+        self.assertEqual(ticket.replies.count(), 1)
+        self.assertIn(reply, ticket.replies.all())
+
+    def test_support_reply_from_staff(self):
+        ticket = self.make_ticket()
+        from_staff = SupportReply.objects.create(
+            ticket=ticket, author=self.staff, body="We are on it."
+        )
+        from_user = SupportReply.objects.create(
+            ticket=ticket, author=self.alice, body="Thanks!"
+        )
+        self.assertTrue(from_staff.from_staff)
+        self.assertFalse(from_user.from_staff)
+
+    def test_support_ticket_updated_at_changes_on_reply(self):
+        """A reply does NOT touch the parent ticket -- documented, then proved.
+
+        ``SupportReply`` has no ``save()`` override and nothing connects a
+        signal to it, so ``auto_now`` on ``SupportTicket.updated_at`` only
+        fires when the ticket itself is saved. This test pins the real
+        behaviour (the reply leaves ``updated_at`` alone) and then shows the
+        field does advance on an explicit ``ticket.save()``. Phase 5h-2 has to
+        save the ticket itself if it wants a replied-to thread to sort to the
+        top of the ``-updated_at`` ordering.
+        """
+        ticket = self.make_ticket()
+        before = ticket.updated_at
+
+        time.sleep(0.01)
+        SupportReply.objects.create(ticket=ticket, author=self.staff, body="Any news?")
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.updated_at, before)
+
+        time.sleep(0.01)
+        ticket.save()
+        ticket.refresh_from_db()
+        self.assertGreater(ticket.updated_at, before)
+
+    # ------------------------------------------------------------- cascades
+    def test_support_ticket_cascade_on_user_delete(self):
+        ticket = self.make_ticket()
+        # Authored by staff on purpose: the reply can then only disappear via
+        # the ticket cascade, not via its own author FK.
+        SupportReply.objects.create(ticket=ticket, author=self.staff, body="On it.")
+        pk = ticket.pk
+
+        self.alice.delete()
+
+        self.assertFalse(SupportTicket.objects.filter(pk=pk).exists())
+        self.assertFalse(SupportReply.objects.filter(ticket_id=pk).exists())
+
+    def test_support_reply_cascade_on_ticket_delete(self):
+        ticket = self.make_ticket()
+        SupportReply.objects.create(ticket=ticket, author=self.alice, body="One")
+        SupportReply.objects.create(ticket=ticket, author=self.staff, body="Two")
+        pk = ticket.pk
+
+        ticket.delete()
+
+        self.assertFalse(SupportReply.objects.filter(ticket_id=pk).exists())
+
+    # -------------------------------------------------------------- indexes
+    def test_support_ticket_indexes_exist(self):
+        fields = [tuple(index.fields) for index in SupportTicket._meta.indexes]
+        self.assertIn(("user", "-updated_at"), fields)
+        self.assertIn(("status", "-updated_at"), fields)
+
+    def test_support_reply_index_exists(self):
+        fields = [tuple(index.fields) for index in SupportReply._meta.indexes]
+        self.assertIn(("ticket", "created_at"), fields)
