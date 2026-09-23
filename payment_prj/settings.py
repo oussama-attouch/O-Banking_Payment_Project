@@ -140,6 +140,16 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+# Under `manage.py test`, swap PBKDF2 for MD5. Fixture users never
+# authenticate against a real backend, and PBKDF2 costs ~1.7s per
+# hash on this machine — 3 fixture users per test class × 124 tests
+# dominated the suite runtime. MD5 is not used outside the test
+# runner; the production hasher is unchanged.
+import sys
+if "test" in sys.argv:
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+
 # Internationalization
 # https://docs.djangoproject.com/en/3.1/topics/i18n/
 

@@ -1235,14 +1235,10 @@ class RecipientViewTests(TestCase):
 
         targets = []
         for index in range(MAX_RECIPIENTS_PER_USER):
-            # password=None -> set_unusable_password(): these 50 are pure
-            # fixtures that never authenticate. Hashing a password for each of
-            # them costs ~1.7s * 50 on this machine (the suite does not swap in
-            # a fast hasher), for no coverage at all.
             user = User.objects.create_user(
                 username="cap%d" % index,
                 email="cap%d@test.invalid" % index,
-                password=None,
+                password=PASSWORD,
             )
             targets.append(Account.objects.get(user=user))
         Recipient.objects.bulk_create(
