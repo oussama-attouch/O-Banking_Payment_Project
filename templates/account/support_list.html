@@ -1,0 +1,135 @@
+{% extends "partials/dashboard-base.html" %}
+
+{% block title %}Support &middot; O-Banking{% endblock %}
+
+{% block content %}
+
+<!-- ========================= Row 1: header ============================ -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <h2 class="h3 mb-1">Support</h2>
+                        <div class="text-secondary">
+                            Open a ticket and track its progress. Staff reply from the admin.
+                        </div>
+                    </div>
+                    {% if open_count %}
+                    <span class="badge bg-blue-lt">{{ open_count }} open</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+
+    <!-- ================== Left: open a new ticket ====================== -->
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Open a new ticket</h2>
+            </div>
+
+            <form method="post" action="{% url 'account:support' %}" novalidate>
+                {% csrf_token %}
+                <div class="card-body">
+
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ form.subject.id_for_label }}">
+                            {{ form.subject.label }}
+                        </label>
+                        {{ form.subject }}
+                        {% if form.subject.errors %}
+                        <div class="text-danger small mt-1">{{ form.subject.errors }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-0">
+                        <label class="form-label" for="{{ form.message.id_for_label }}">
+                            {{ form.message.label }}
+                        </label>
+                        {{ form.message }}
+                        {% if form.message.errors %}
+                        <div class="text-danger small mt-1">{{ form.message.errors }}</div>
+                        {% endif %}
+                    </div>
+
+                </div>
+
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary w-100">Open ticket</button>
+                    <div class="text-secondary small mt-2">
+                        You can reply to the thread after opening. Staff usually reply within a few days.
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ===================== Right: your tickets ======================= -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Your tickets</h2>
+            </div>
+
+            {% if tickets %}
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Subject</th>
+                            <th>Status</th>
+                            <th>Updated</th>
+                            <th>Replies</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ticket in tickets %}
+                        <tr>
+                            <td class="text-secondary">{{ ticket.pk }}</td>
+                            <td>
+                                <a href="{% url 'account:support_detail' ticket.pk %}">
+                                    {{ ticket.subject }}
+                                </a>
+                            </td>
+                            <td>
+                                {% if ticket.status == "open" %}
+                                <span class="badge bg-warning-lt">{{ ticket.get_status_display }}</span>
+                                {% elif ticket.status == "in_progress" %}
+                                <span class="badge bg-info-lt">{{ ticket.get_status_display }}</span>
+                                {% elif ticket.status == "resolved" %}
+                                <span class="badge bg-success-lt">{{ ticket.get_status_display }}</span>
+                                {% else %}
+                                <span class="badge bg-secondary-lt">{{ ticket.get_status_display }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-secondary text-nowrap">{{ ticket.updated_at|date:"M j, Y" }}</td>
+                            <td class="text-secondary">{{ ticket.replies.count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card-body">
+                <div class="empty">
+                    <div class="empty-icon text-secondary"><i class="ti ti-message-circle fs-1"></i></div>
+                    <p class="empty-title">No tickets yet</p>
+                    <p class="empty-subtitle text-secondary">
+                        Open one using the form on the left.
+                    </p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+</div>
+
+{% endblock content %}

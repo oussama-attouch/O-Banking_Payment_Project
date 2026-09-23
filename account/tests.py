@@ -1702,3 +1702,186 @@ class SupportTests(TestCase):
     def test_support_reply_index_exists(self):
         fields = [tuple(index.fields) for index in SupportReply._meta.indexes]
         self.assertIn(("ticket", "created_at"), fields)
+
+
+# =====================================================================
+# Phase 5h-2  support UI
+# =====================================================================
+class SupportViewTests(TestCase):
+    """The /account/support/ pages: list + inline create, detail + reply.
+
+    No KYC row is created: both views are login-only (like
+    ``account:recipients``), not ``_kyc_required``-gated.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
+
+    def setUp(self):
+        self.alice = User.objects.create_user(
+            username="sv_alice", email="sv_alice@test.invalid", password=PASSWORD
+        )
+        self.bob = User.objects.create_user(
+            username="sv_bob", email="sv_bob@test.invalid", password=PASSWORD
+        )
+        self.client.force_login(self.alice)
+
+    def make_ticket(self, user=None, subject="Card declined"):
+        return SupportTicket.objects.create(user=user or self.alice, subject=subject)
+
+    # --------------------------------------------------------------- access
+    def test_support_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("account:support"))
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_support_renders_empty(self):
+        resp = self.client.get(reverse("account:support"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Open a new ticket")
+        self.assertContains(resp, "Your tickets")
+        self.assertContains(resp, "No tickets yet")
+
+    # --------------------------------------------------------------- create
+    def test_support_create_ticket_and_first_reply(self):
+        resp = self.client.post(reverse("account:support"), {
+            "subject": "Card declined",
+            "message": "My card was declined this morning.",
+        })
+
+        ticket = SupportTicket.objects.get()
+        self.assertRedirects(
+            resp, reverse("account:support_detail", args=[ticket.pk])
+        )
+        self.assertEqual(SupportTicket.objects.count(), 1)
+        self.assertEqual(ticket.user_id, self.alice.pk)
+        self.assertEqual(ticket.subject, "Card declined")
+        self.assertEqual(ticket.status, SupportTicket.STATUS_OPEN)
+
+        reply = SupportReply.objects.get()
+        self.assertEqual(reply.ticket_id, ticket.pk)
+        self.assertEqual(reply.author_id, self.alice.pk)
+        self.assertEqual(reply.body, "My card was declined this morning.")
+
+    def test_support_create_rejects_blank_subject(self):
+        resp = self.client.post(reverse("account:support"), {
+            "subject": "",
+            "message": "No subject given.",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(SupportTicket.objects.count(), 0)
+        self.assertEqual(SupportReply.objects.count(), 0)
+
+    # --------------------------------------------------------------- detail
+    def test_support_detail_only_own_ticket(self):
+        ticket = self.make_ticket()
+        self.client.force_login(self.bob)
+
+        resp = self.client.get(
+            reverse("account:support_detail", args=[ticket.pk]), follow=True
+        )
+        self.assertContains(resp, "Ticket not found.")
+        self.assertEqual(resp.redirect_chain[-1][0], reverse("account:support"))
+        self.assertTrue(SupportTicket.objects.filter(pk=ticket.pk).exists())
+
+    def test_support_detail_404_for_missing_pk(self):
+        resp = self.client.get(
+            reverse("account:support_detail", args=[999999])
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("account:support"))
+
+    # ---------------------------------------------------------------- reply
+    def test_support_reply_appends_and_bumps_updated_at(self):
+        ticket = self.make_ticket()
+        before = ticket.updated_at
+
+        time.sleep(0.01)
+        resp = self.client.post(
+            reverse("account:support_detail", args=[ticket.pk]),
+            {"body": "Any update on this?"},
+        )
+        self.assertRedirects(
+            resp, reverse("account:support_detail", args=[ticket.pk])
+        )
+
+        self.assertEqual(ticket.replies.count(), 1)
+        self.assertEqual(ticket.replies.get().body, "Any update on this?")
+
+        ticket.refresh_from_db()
+        self.assertGreater(ticket.updated_at, before)
+
+    def test_support_reply_rejected_on_closed_ticket(self):
+        ticket = self.make_ticket()
+        ticket.status = SupportTicket.STATUS_CLOSED
+        ticket.save(update_fields=["status"])
+        before = SupportReply.objects.count()
+
+        resp = self.client.post(
+            reverse("account:support_detail", args=[ticket.pk]),
+            {"body": "One more thing."},
+            follow=True,
+        )
+
+        self.assertEqual(SupportReply.objects.count(), before)
+        self.assertContains(resp, "This ticket is closed")
+        # The reply form must not be rendered for a closed ticket.
+        self.assertNotContains(resp, "Post reply")
+
+    def test_support_detail_reply_requires_ownership(self):
+        ticket = self.make_ticket(user=self.alice)
+        self.client.force_login(self.bob)
+
+        resp = self.client.post(
+            reverse("account:support_detail", args=[ticket.pk]),
+            {"body": "I should not be able to post this."},
+            follow=True,
+        )
+
+        self.assertContains(resp, "Ticket not found.")
+        self.assertEqual(SupportReply.objects.count(), 0)
+        self.assertEqual(ticket.replies.count(), 0)
+
+    # -------------------------------------------------------------- ordering
+    def test_support_list_orders_by_updated_at_desc(self):
+        older = self.make_ticket(subject="Older ticket")
+        time.sleep(0.01)
+        newer = self.make_ticket(subject="Newer ticket")
+
+        # Newest-created first, before any reply.
+        self.assertEqual(
+            list(SupportTicket.objects.filter(user=self.alice)),
+            [newer, older],
+        )
+
+        time.sleep(0.01)
+        self.client.post(
+            reverse("account:support_detail", args=[older.pk]),
+            {"body": "Replying to the older ticket."},
+        )
+
+        # The reply bumped the older ticket, so it must now sort first. This is
+        # what proves the explicit ticket.save(update_fields=["updated_at"]).
+        body = self.client.get(reverse("account:support")).content.decode()
+        self.assertLess(
+            body.index("Older ticket"),
+            body.index("Newer ticket"),
+            "the replied-to ticket must sort above the newer one",
+        )
+        self.assertEqual(
+            list(SupportTicket.objects.filter(user=self.alice)),
+            [older, newer],
+        )

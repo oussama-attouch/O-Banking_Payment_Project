@@ -1,0 +1,134 @@
+{% extends "partials/dashboard-base.html" %}
+
+{% block title %}Ticket #{{ ticket.pk }} &middot; O-Banking{% endblock %}
+
+{% block content %}
+
+<!-- ========================= Row 1: header ============================ -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item">
+                            <a href="{% url 'account:support' %}">Support</a>
+                        </li>
+                        <li class="breadcrumb-item active" aria-current="page">#{{ ticket.pk }}</li>
+                    </ol>
+                </nav>
+
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <h2 class="h3 mb-1">{{ ticket.subject }}</h2>
+                        <div class="text-secondary">
+                            Opened {{ ticket.created_at|date:"M j, Y" }}
+                            &middot; Last updated {{ ticket.updated_at|timesince }} ago
+                        </div>
+                    </div>
+                    <div class="text-nowrap">
+                        {% if ticket.status == "open" %}
+                        <span class="badge bg-warning-lt">{{ ticket.get_status_display }}</span>
+                        {% elif ticket.status == "in_progress" %}
+                        <span class="badge bg-info-lt">{{ ticket.get_status_display }}</span>
+                        {% elif ticket.status == "resolved" %}
+                        <span class="badge bg-success-lt">{{ ticket.get_status_display }}</span>
+                        {% else %}
+                        <span class="badge bg-secondary-lt">{{ ticket.get_status_display }}</span>
+                        {% endif %}
+                        {% if ticket.priority == "low" %}
+                        <span class="badge bg-secondary-lt">{{ ticket.get_priority_display }}</span>
+                        {% elif ticket.priority == "high" %}
+                        <span class="badge bg-danger-lt">{{ ticket.get_priority_display }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ======================== Row 2: conversation ======================= -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Conversation</h2>
+            </div>
+
+            <div class="card-body">
+                {% for reply in replies %}
+                {% if not forloop.first %}
+                <hr>
+                {% endif %}
+                <div class="d-flex mb-4">
+                    <div class="me-3">
+                        {% if reply.from_staff %}
+                        <span class="avatar avatar-sm bg-primary-lt">{{ reply.author.first_name|default:reply.author.username|first|upper }}</span>
+                        {% else %}
+                        <span class="avatar avatar-sm bg-secondary-lt">{{ reply.author.first_name|default:reply.author.username|first|upper }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="flex-fill">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <span class="fw-medium">{{ reply.author.get_full_name|default:reply.author.username }}</span>
+                                {% if reply.from_staff %}
+                                <span class="badge bg-blue-lt ms-2">Staff</span>
+                                {% endif %}
+                            </div>
+                            <span class="text-secondary small">{{ reply.created_at|date:"M j, Y H:i" }}</span>
+                        </div>
+                        <div class="mt-2">{{ reply.body|linebreaksbr }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================= Row 3: reply ============================= -->
+{% if ticket.is_open %}
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Add a reply</h2>
+            </div>
+
+            <form method="post" action="{% url 'account:support_detail' ticket.pk %}" novalidate>
+                {% csrf_token %}
+                <div class="card-body">
+                    <label class="form-label" for="{{ form.body.id_for_label }}">Reply</label>
+                    {{ form.body }}
+                    {% if form.body.errors %}
+                    <div class="text-danger small mt-1">{{ form.body.errors }}</div>
+                    {% endif %}
+                </div>
+
+                <div class="card-footer d-flex align-items-center justify-content-between">
+                    <a href="{% url 'account:support' %}" class="btn btn-outline-secondary">
+                        Back to support
+                    </a>
+                    <button type="submit" class="btn btn-primary">Post reply</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="alert alert-secondary" role="alert">
+            This ticket is {% if ticket.status == "closed" %}closed{% else %}resolved{% endif %}.
+            Open a new ticket if you need further help.
+            <a href="{% url 'account:support' %}" class="ms-2">Back to support</a>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% endblock content %}

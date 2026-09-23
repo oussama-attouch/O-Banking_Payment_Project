@@ -12,8 +12,21 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from account import analytics
-from account.models import KYC, Account, Notification, Recipient
-from account.forms import KYCForm, ProfileForm, RecipientForm
+from account.models import (
+    KYC,
+    Account,
+    Notification,
+    Recipient,
+    SupportReply,
+    SupportTicket,
+)
+from account.forms import (
+    KYCForm,
+    ProfileForm,
+    RecipientForm,
+    SupportReplyForm,
+    SupportTicketForm,
+)
 from core.models import Transaction
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -722,3 +735,103 @@ def notification_mark_all_read(request):
     Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
     messages.success(request, "All notifications marked as read.")
     return redirect("account:notifications")
+
+
+# =====================================================================
+# Phase 5h-2  support tickets
+# =====================================================================
+@login_required
+def support_view(request):
+    """List the user's tickets and render the create form inline.
+
+    Adding a ticket is a POST to this view. Login-only, like
+    ``account:recipients``: a support thread is the user's own activity, not
+    banking data, so it does not go through ``_kyc_required``.
+    """
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    if request.method == "POST":
+        form = SupportTicketForm(request.POST)
+        if form.is_valid():
+            ticket = SupportTicket.objects.create(
+                user=request.user,
+                subject=form.cleaned_data["subject"].strip(),
+            )
+            SupportReply.objects.create(
+                ticket=ticket,
+                author=request.user,
+                body=form.cleaned_data["message"].strip(),
+            )
+            # No ticket.save() on purpose: the ticket was just INSERTed with
+            # auto_now's now(), and Phase 5h-1 established that creating a
+            # reply does not move updated_at, so it is already correct.
+            messages.success(request, f"Ticket #{ticket.pk} opened.")
+            return redirect("account:support_detail", pk=ticket.pk)
+    else:
+        form = SupportTicketForm()
+
+    tickets = (SupportTicket.objects
+               .filter(user=request.user)
+               .prefetch_related("replies"))
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "form": form,
+        "tickets": tickets,
+        "open_count": sum(1 for t in tickets if t.is_open),
+    }
+    return render(request, "account/support_list.html", context)
+
+
+@login_required
+def support_detail(request, pk):
+    """One ticket with its thread, plus a reply form (POST here)."""
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    ticket = SupportTicket.objects.filter(pk=pk, user=request.user).first()
+    if ticket is None:
+        # Not-found and not-yours are indistinguishable on purpose, matching
+        # the Phase 1.9 guards: another user's pk must not confirm the row.
+        messages.warning(request, "Ticket not found.")
+        return redirect("account:support")
+
+    if request.method == "POST":
+        # The template hides the reply form on a ticket that is not open; this
+        # is the server-side half of that rule, so a hand-made POST cannot
+        # append to a resolved or closed thread.
+        if not ticket.is_open:
+            messages.warning(
+                request,
+                "This ticket is closed. Open a new ticket if you need further help.",
+            )
+            return redirect("account:support_detail", pk=ticket.pk)
+
+        form = SupportReplyForm(request.POST)
+        if form.is_valid():
+            SupportReply.objects.create(
+                ticket=ticket,
+                author=request.user,
+                body=form.cleaned_data["body"].strip(),
+            )
+            # Carry-over from Phase 5h-1: SupportReply.save() does not touch
+            # the parent, so bump it explicitly. Without this the thread would
+            # not rise to the top of Meta.ordering = ["-updated_at"].
+            ticket.save(update_fields=["updated_at"])
+            messages.success(request, "Reply posted.")
+            return redirect("account:support_detail", pk=ticket.pk)
+    else:
+        form = SupportReplyForm()
+
+    replies = ticket.replies.select_related("author", "author__kyc")
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "ticket": ticket,
+        "replies": replies,
+        "form": form,
+    }
+    return render(request, "account/support_detail.html", context)

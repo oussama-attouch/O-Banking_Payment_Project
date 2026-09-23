@@ -41,4 +41,9 @@ urlpatterns = [
     path("notifications/", views.notifications_view, name="notifications"),
     path("notifications/<int:pk>/read/", views.notification_mark_read, name="notification_mark_read"),
     path("notifications/read-all/", views.notification_mark_all_read, name="notification_mark_all_read"),
+
+    # Phase 5h-2. Support tickets. The create form is inline on the list page,
+    # so adding a ticket is a POST to "support", not a separate route.
+    path("support/", views.support_view, name="support"),
+    path("support/<int:pk>/", views.support_detail, name="support_detail"),
 ]

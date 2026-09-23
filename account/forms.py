@@ -103,3 +103,44 @@ class RecipientForm(forms.Form):
         if not value:
             raise forms.ValidationError("Please enter an account number.")
         return value
+
+
+class SupportTicketForm(forms.Form):
+    """Open a ticket: a subject plus the first message of the thread.
+
+    A plain ``Form``, not a ``ModelForm``: the subject becomes
+    ``SupportTicket.subject`` and the message becomes the first
+    ``SupportReply``, so one form writes two models and the view owns that.
+    ``status`` and ``priority`` are deliberately absent -- only staff set
+    them, through the admin.
+    """
+
+    subject = forms.CharField(
+        max_length=200,
+        widget=forms.TextInput(attrs={
+            "class": "form-control",
+            "placeholder": "Short summary of the issue",
+            "autocomplete": "off",
+        }),
+    )
+    message = forms.CharField(
+        widget=forms.Textarea(attrs={
+            "class": "form-control",
+            "rows": 5,
+            "placeholder": "Describe what happened.",
+        }),
+        label="Your message",
+    )
+
+
+class SupportReplyForm(forms.Form):
+    """One message appended to an existing thread."""
+
+    body = forms.CharField(
+        widget=forms.Textarea(attrs={
+            "class": "form-control",
+            "rows": 4,
+            "placeholder": "Add a reply…",
+        }),
+        label="Reply",
+    )
