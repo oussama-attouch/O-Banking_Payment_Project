@@ -2071,3 +2071,102 @@ class SupportViewTests(TestCase):
             list(SupportTicket.objects.filter(user=self.alice)),
             [older, newer],
         )
+
+
+# =====================================================================
+# Phase D  full-text search on the transaction history
+# =====================================================================
+class SearchTests(DashboardAnalyticsTestBase):
+    """``?q=`` matches description, transaction id, and counterparty.
+
+    The fixture is deliberately tiny and the search terms are chosen so exactly
+    one row can match: "rent" appears only in t1's description, "carol" only in
+    t3's sender. No fixture username, email, or generated transaction id
+    contains either word.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.rent = self.make_txn(self.alice, self.bob, "100.00",
+                                  description="rent for october")
+        self.grocery = self.make_txn(self.alice, self.bob, "20.00",
+                                     description="grocery")
+        self.loan = self.make_txn(self.carol, self.alice, "30.00",
+                                  description="loan repayment")
+
+    def url(self):
+        return reverse("account:dashboard")
+
+    def history(self, **params):
+        """The dashboard response for ``params``, asserting it rendered."""
+        resp = self.client.get(self.url(), params)
+        self.assertEqual(resp.status_code, 200)
+        return resp.context["transaction_history"]
+
+    def pks(self, history):
+        return [t.pk for t in history["items"]]
+
+    def test_search_matches_description(self):
+        history = self.history(q="rent")
+        self.assertEqual(self.pks(history), [self.rent.pk])
+        self.assertEqual(history["total"], 1)
+
+    def test_search_matches_transaction_id(self):
+        fragment = self.grocery.transaction_id[:10]
+        history = self.history(q=fragment)
+        self.assertIn(self.grocery.pk, self.pks(history))
+        self.assertEqual(history["total"], 1)
+
+    def test_search_matches_counterparty_username(self):
+        # carol is the *sender* of the loan, so this can only match the party
+        # columns, not the description.
+        history = self.history(q="carol")
+        self.assertEqual(self.pks(history), [self.loan.pk])
+
+        # bob is the reciever of both alice transfers.
+        history = self.history(q="bob")
+        self.assertEqual(sorted(self.pks(history)),
+                         sorted([self.rent.pk, self.grocery.pk]))
+
+    def test_search_is_case_insensitive(self):
+        lower = self.history(q="rent")
+        upper = self.history(q="RENT")
+        self.assertEqual(self.pks(lower), self.pks(upper))
+        self.assertEqual(self.pks(lower), [self.rent.pk])
+
+    def test_search_blank_returns_all(self):
+        everything = self.history()
+        self.assertEqual(everything["total"], 3)
+
+        for blank in ("", "   "):
+            with self.subTest(q=repr(blank)):
+                resp = self.client.get(self.url(), {"q": blank})
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(
+                    resp.context["transaction_history"]["total"],
+                    everything["total"],
+                    "a blank q must not filter",
+                )
+                self.assertEqual(resp.context["history_q"], "")
+
+    def test_search_preserves_other_filters(self):
+        resp = self.client.get(self.url(),
+                               {"q": "rent", "period": "7d", "txn_type": "transfer"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["active_period"], "7d")
+        self.assertEqual(resp.context["active_type"], "transfer")
+        self.assertEqual(resp.context["history_q"], "rent")
+
+        # The page-level ?txn_type= deliberately does not scope the table: the
+        # history has its own ?type= filter (see dashboard()'s docstring), so the
+        # search is the only thing narrowing it here -- and the row it keeps is
+        # a transfer, which is what the page filter asked for anyway.
+        history = resp.context["transaction_history"]
+        self.assertEqual(self.pks(history), [self.rent.pk])
+        self.assertEqual(history["items"][0].transaction_type, "transfer")
+
+        # That own filter still applies alongside the search: the rent row is a
+        # transfer, so asking for requests leaves nothing.
+        narrowed = self.history(q="rent", type="request")
+        self.assertEqual(narrowed["items"], [])
+        self.assertEqual(narrowed["total"], 0)

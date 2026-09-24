@@ -462,11 +462,18 @@ def get_kyc_status(user, account=None, has_kyc=None):
     }
 
 
-def get_transaction_history(user, status=None, ttype=None, page=1, per_page=20):
+def get_transaction_history(user, status=None, ttype=None,
+                            q=None, page=1, per_page=20):
     """A page of the user's transactions, newest first, with filters.
 
     ``status`` and ``ttype`` are ignored when they are not valid choice keys, so
     a hand-edited query string cannot widen or break the query.
+
+    ``q`` is free text matched against the description, the transaction id and
+    both parties' ``username`` and ``email`` -- one box, six columns. It uses
+    SQLite's ``LIKE`` (Django's ``icontains``), which is what the demo database
+    can do; at 3,000 rows that is instant. The production upgrade on PostgreSQL
+    is a ``SearchVector`` field with a ``GinIndex``.
 
     Query count: **2** -- one COUNT, one page of rows.
     """
@@ -475,6 +482,17 @@ def get_transaction_history(user, status=None, ttype=None, page=1, per_page=20):
         queryset = queryset.filter(status=status)
     if ttype in TYPE_KEYS:
         queryset = queryset.filter(transaction_type=ttype)
+    q = (q or "").strip()
+    if q:
+        # ``reciever`` is the schema's spelling, not a typo here.
+        queryset = queryset.filter(
+            Q(description__icontains=q)
+            | Q(transaction_id__icontains=q)
+            | Q(sender__username__icontains=q)
+            | Q(sender__email__icontains=q)
+            | Q(reciever__username__icontains=q)
+            | Q(reciever__email__icontains=q)
+        )
     queryset = queryset.select_related(
         "sender",
         "sender__kyc",

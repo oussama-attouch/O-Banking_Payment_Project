@@ -501,6 +501,11 @@
             {% endcomment %}
             <input type="hidden" name="period" value="{{ active_period }}">
             <div class="col-auto">
+                <input type="search" name="q" value="{{ history_q }}"
+                       class="form-control" placeholder="Search transactions…"
+                       aria-label="Search transactions">
+            </div>
+            <div class="col-auto">
                 <select name="status" class="form-select" aria-label="Filter by status">
                     <option value="">All statuses</option>
                     {% for key, label in history_choices %}
@@ -572,16 +577,26 @@
         </table>
     </div>
 
+    {% if history_q %}
+    <div class="card-body py-2">
+        <div class="text-secondary small mt-2">
+            Showing results for "{{ history_q }}".
+            <a href="?period={{ active_period }}&amp;txn_type={{ active_type }}&amp;status={{ history_status }}&amp;type={{ history_type }}"
+               class="ms-2">Clear search</a>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card-footer d-flex align-items-center justify-content-between">
         <div class="text-secondary small">
             Page {{ transaction_history.page }} of {{ transaction_history.total_pages }}
         </div>
         <ul class="pagination m-0">
             <li class="page-item{% if not transaction_history.has_prev %} disabled{% endif %}">
-                <a class="page-link" href="?status={{ history_status }}&amp;type={{ history_type }}&amp;page={{ transaction_history.page|add:"-1" }}">Previous</a>
+                <a class="page-link" href="?status={{ history_status }}&amp;type={{ history_type }}&amp;q={{ history_q }}&amp;page={{ transaction_history.page|add:"-1" }}">Previous</a>
             </li>
             <li class="page-item{% if not transaction_history.has_next %} disabled{% endif %}">
-                <a class="page-link" href="?status={{ history_status }}&amp;type={{ history_type }}&amp;page={{ transaction_history.page|add:"1" }}">Next</a>
+                <a class="page-link" href="?status={{ history_status }}&amp;type={{ history_type }}&amp;q={{ history_q }}&amp;page={{ transaction_history.page|add:"1" }}">Next</a>
             </li>
         </ul>
     </div>

@@ -150,6 +150,7 @@ def dashboard(request):
 
     history_status = (request.GET.get("status") or "").strip()
     history_type = (request.GET.get("type") or "").strip()
+    history_q = (request.GET.get("q") or "").strip()
     try:
         page = int(request.GET.get("page", 1))
     except (TypeError, ValueError):
@@ -163,10 +164,12 @@ def dashboard(request):
             request.user,
             status=history_status or None,
             ttype=history_type or None,
+            q=history_q or None,
             page=page,
         ),
         "history_status": history_status,
         "history_type": history_type,
+        "history_q": history_q,
         "history_choices": analytics.STATUS_CHOICES,
         "history_type_choices": analytics.TYPE_CHOICES,
         # The page-level filter, echoed back so the bar and the labels agree with
