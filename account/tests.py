@@ -2338,3 +2338,115 @@ class CategoryViewTests(DashboardAnalyticsTestBase):
         self.assertEqual(len(active), 1, "exactly one sidebar item is active")
         self.assertIn("account/categories/", active[0])
         self.assertIn("Categories", active[0])
+
+
+# =====================================================================
+# Phase E-2b  spend by category
+# =====================================================================
+class SpendByCategoryTests(DashboardAnalyticsTestBase):
+    """``get_spend_by_category`` and the dashboard context that feeds the doughnut.
+
+    "Spending" is money *out* of alice's account: a transfer she sent, or a
+    request she received (the direction rule the rest of the module uses).
+    """
+
+    def category(self, slug):
+        # The post_save receiver gave alice the six defaults.
+        return Category.objects.get(user=self.alice, slug=slug)
+
+    def spent(self, sender, reciever, amount, ttype="transfer", status="completed",
+              category=None, when=None):
+        txn = self.make_txn(sender, reciever, amount, status=status, ttype=ttype,
+                            when=when)
+        if category is not None:
+            txn.category = category
+            txn.save()
+        return txn
+
+    def test_spend_empty_for_fresh_user(self):
+        fresh, _ = self.make_user("fresh", "0.00", kyc=False)
+        spend = analytics.get_spend_by_category(fresh)
+        self.assertEqual(spend["total"], Decimal("0.00"))
+        self.assertEqual(spend["slices"], [])
+
+    def test_spend_groups_by_category(self):
+        self.spent(self.alice, self.bob, "30.00", category=self.category("groceries"))
+        self.spent(self.alice, self.bob, "20.00", category=self.category("transport"))
+
+        spend = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(spend["total"], Decimal("50.00"))
+        self.assertEqual([s["name"] for s in spend["slices"]],
+                         ["Groceries", "Transport"])
+        self.assertEqual([s["amount"] for s in spend["slices"]],
+                         [Decimal("30.00"), Decimal("20.00")])
+        self.assertEqual([s["slug"] for s in spend["slices"]],
+                         ["groceries", "transport"])
+        self.assertEqual([s["color"] for s in spend["slices"]], ["blue", "green"])
+        self.assertEqual([s["percent"] for s in spend["slices"]], [60.0, 40.0])
+
+    def test_spend_uncategorized_slice(self):
+        self.spent(self.alice, self.bob, "10.00")  # no category
+
+        spend = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(spend["total"], Decimal("10.00"))
+        self.assertEqual(len(spend["slices"]), 1)
+        slice_ = spend["slices"][0]
+        self.assertEqual(slice_["name"], "Uncategorized")
+        self.assertEqual(slice_["slug"], "")
+        self.assertEqual(slice_["color"], "gray")
+        self.assertEqual(slice_["percent"], 100.0)
+
+    def test_spend_ignores_incoming(self):
+        # bob -> alice: alice is the reciever of a transfer, so it is income.
+        self.spent(self.bob, self.alice, "99.00")
+
+        spend = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(spend["total"], Decimal("0.00"))
+        self.assertEqual(spend["slices"], [])
+
+    def test_spend_ignores_unsettled(self):
+        self.spent(self.alice, self.bob, "40.00", status="processing")
+        self.spent(self.alice, self.bob, "5.00", status="request_processing")
+
+        spend = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(spend["total"], Decimal("0.00"))
+        self.assertEqual(spend["slices"], [])
+
+    def test_spend_respects_days_window(self):
+        self.spent(self.alice, self.bob, "70.00",
+                   when=timezone.now() - timedelta(days=40))
+        self.spent(self.alice, self.bob, "12.00",
+                   when=timezone.now() - timedelta(days=5))
+
+        recent = analytics.get_spend_by_category(self.alice, days=30)
+        self.assertEqual(recent["total"], Decimal("12.00"))
+
+        everything = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(everything["total"], Decimal("82.00"))
+
+    def test_spend_respects_transaction_type(self):
+        self.spent(self.alice, self.bob, "10.00", ttype="transfer")
+        # A request alice is the reciever of is also money out for her.
+        self.spent(self.bob, self.alice, "25.00", ttype="request")
+
+        both = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(both["total"], Decimal("35.00"))
+
+        transfers = analytics.get_spend_by_category(self.alice,
+                                                    transaction_type="transfer")
+        self.assertEqual(transfers["total"], Decimal("10.00"))
+
+        requests = analytics.get_spend_by_category(self.alice,
+                                                   transaction_type="request")
+        self.assertEqual(requests["total"], Decimal("25.00"))
+
+    def test_dashboard_context_has_spend_by_category(self):
+        self.spent(self.alice, self.bob, "8.00", category=self.category("utilities"))
+
+        resp = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(resp.status_code, 200)
+
+        spend = resp.context["spend_by_category"]
+        self.assertEqual(set(spend), {"total", "slices"})
+        self.assertEqual(spend["total"], Decimal("8.00"))
+        self.assertEqual([s["name"] for s in spend["slices"]], ["Utilities"])

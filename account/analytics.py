@@ -44,7 +44,7 @@ from django.db.models import (
 from django.db.models.functions import TruncDate, TruncWeek
 from django.utils import timezone
 
-from account.models import Account, KYC
+from account.models import Account, Category, KYC
 from core.models import Transaction
 from userauths.models import User
 
@@ -517,6 +517,79 @@ def get_transaction_history(user, status=None, ttype=None,
         "has_prev": page_obj.has_previous(),
         "items": list(page_obj.object_list),
     }
+
+
+#: Slices the doughnut draws individually; the tail is folded into "Other".
+MAX_CATEGORY_SLICES = 8
+
+#: The two synthetic slices. Neither can collide with a real Category row:
+#: slugs are non-empty for real rows, and "__other__" is slugified from the
+#: label "Other" only if a user names a category exactly that.
+UNCATEGORIZED = {"name": "Uncategorized", "slug": "", "color": "gray"}
+OTHER_SLICE = {"name": "Other", "slug": "__other__", "color": "gray"}
+
+
+def get_spend_by_category(user, days=None, transaction_type=None):
+    """Spending totals per category, descending, for the doughnut.
+
+    "Spending" is money *out* of the user's account -- ``_sent_q``'s rule:
+    ``(transfer and sender) or (request and reciever)`` -- counting only
+    ``COMPLETED_STATUSES``. ``days`` scopes it to the trailing window
+    (``None`` = all time) and ``transaction_type`` narrows it to one type;
+    both reuse the helpers every other metric uses.
+
+    Transactions with no category are one slice named "Uncategorized": a
+    deleted category has already been SET_NULLed on the row, so NULL is the
+    only case. At most :data:`MAX_CATEGORY_SLICES` slices are returned
+    individually and the tail is summed into "Other".
+
+    Query count: **2** -- one grouped aggregate, one lookup for the names,
+    slugs and colours. The second is skipped when every slice is
+    uncategorized, so the count is 1 in that case.
+    """
+    rows = list(
+        Transaction.objects.filter(_sent_q(user))
+        .filter(status__in=COMPLETED_STATUSES)
+        .filter(_type_q(transaction_type))
+        .filter(_window(days))
+        .values("category_id")
+        .annotate(total=Sum("amount"))
+        .order_by("-total")
+    )
+    total = _money(sum((row["total"] for row in rows), ZERO))
+    if total == ZERO:
+        return {"total": ZERO, "slices": []}
+
+    head, tail = rows[:MAX_CATEGORY_SLICES], rows[MAX_CATEGORY_SLICES:]
+    ids = [row["category_id"] for row in head if row["category_id"] is not None]
+    categories = {}
+    if ids:
+        categories = {c.pk: c for c in Category.objects.filter(pk__in=ids)}
+
+    def slice_of(amount, name, slug, color):
+        return {
+            "name": name,
+            "slug": slug,
+            "color": color,
+            "amount": _money(amount),
+            # A float, for the template and the tooltip; 1 decimal is enough
+            # for a percentage label.
+            "percent": round(float(_money(amount) / total * 100), 1),
+        }
+
+    slices = []
+    for row in head:
+        category = categories.get(row["category_id"])
+        if category is None:
+            slices.append(slice_of(row["total"], **UNCATEGORIZED))
+        else:
+            slices.append(slice_of(row["total"], category.name, category.slug,
+                                   category.color))
+    if tail:
+        slices.append(slice_of(sum((row["total"] for row in tail), ZERO),
+                               **OTHER_SLICE))
+
+    return {"total": total, "slices": slices}
 
 
 # --------------------------------------------------------------- KPI deltas

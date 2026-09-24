@@ -2,7 +2,7 @@
 
 A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively-licensed UI.
 
-`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `244 tests passing`
+`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `252 tests passing`
 
 ## Table of contents
 
@@ -39,7 +39,7 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 ## Solution Overview
 
-**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 244 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
+**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 252 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
 **Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports: Django, django-jazzmin, django-import-export, shortuuid, and Pillow.
 
@@ -100,7 +100,7 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 - Period and type filter bar that recomputes every KPI and every chart from one row of links
 - KPI sparklines, delta chips, and dark mode
 - Statements with a range selector (this month, last 3 months, this year, last 12 months) and CSV export
-- Custom spending categories with a usage count and one-click removal
+- Custom spending categories with a dashboard spend-by-category doughnut chart and a top-categories list
 - Full-text search across description, transaction id, and counterparty
 - Saved recipients for one-click transfers
 - Notification center: a bell in the topbar with an unread badge, a 5-item dropdown, and a paginated list
@@ -183,9 +183,13 @@ Login is limited to 5 attempts per email per 15 minutes; transfer, settlement, a
 
 A correct password alone does not authenticate the session when the user has a confirmed TOTP device. `LoginView` sets `session["2fa_pending_user_id"]` and `session["2fa_pending_at"]` and redirects to the challenge view; `login()` is called only after a valid TOTP code or an unused recovery code. The pending state expires after five minutes. This is the security property the feature exists to guarantee: an attacker who has the password but not the second factor is left anonymous.
 
+### n) Spend is derived, not stored
+
+The spend-by-category chart is computed from `Transaction` rows at render time, not stored in a running total. That means a category deletion or an amount edit retroactively updates the chart — the fact that `Transaction.category` uses `SET_NULL` makes the deleted-category slice appear as "Uncategorized" without a data migration. The chart is a projection of the ledger, not a second source of truth.
+
 ## Results
 
-- 244 tests, from 0 (three stubs, four lines)
+- 252 tests, from 0 (three stubs, four lines)
 - `static/` 13.99 MB → 2.38 MB (−83%, 206 files → 11)
 - 7 critical bugs from the original audit closed
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect

@@ -392,6 +392,68 @@
     </div>
 </div>
 
+<!-- ================= Row 5b: spending by category (E-2b) =============== -->
+<div class="row row-deck row-cards mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h2 class="card-title mb-0">Spending by category</h2>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="text-secondary small">{{ active_period_label }}</span>
+                    <button type="button" class="btn btn-ghost-secondary btn-icon btn-sm"
+                            data-chart-export="chart-category" aria-label="Download chart">
+                        <i class="ti ti-download"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-lg-7">
+                        {% comment %}
+                        The empty state is rendered server-side as well as being
+                        re-applied by renderCategoryChart(): the page-level chart
+                        script bails out entirely when there is nothing to plot, so
+                        without this a user with no activity would be left looking
+                        at a blank canvas.
+                        {% endcomment %}
+                        <div id="category-chart-empty"{% if spend_by_category.slices %} class="d-none"{% endif %}>
+                            <div class="empty">
+                                <div class="empty-icon">
+                                    <div class="avatar avatar-md bg-secondary-lt rounded-circle">
+                                        <i class="ti ti-chart-pie"></i>
+                                    </div>
+                                </div>
+                                <p class="empty-title">No spending yet</p>
+                                <p class="empty-subtitle text-secondary">
+                                    Categorised spending will appear here once you record transactions.
+                                </p>
+                            </div>
+                        </div>
+                        <canvas id="chart-category" style="height: 16rem;"{% if not spend_by_category.slices %} class="d-none"{% endif %}></canvas>
+                    </div>
+                    <div class="col-lg-5">
+                        <div id="category-list-empty"{% if spend_by_category.slices %} class="d-none"{% endif %}></div>
+                        <div id="category-list"{% if not spend_by_category.slices %} class="d-none"{% endif %}>
+                            {% for s in spend_by_category.slices %}
+                            <div class="d-flex align-items-center justify-content-between py-2{% if not forloop.last %} border-bottom{% endif %}">
+                                <div class="d-flex align-items-center">
+                                    <span class="badge {% if s.color == "gray" %}bg-secondary-lt{% else %}bg-{{ s.color }}-lt{% endif %} me-2">&#8203;</span>
+                                    <span class="fw-medium">{{ s.name }}</span>
+                                </div>
+                                <div class="text-end">
+                                    <div class="fw-medium">{{ s.amount }}</div>
+                                    <div class="text-secondary small">{{ s.percent }}%</div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ============================== Row 4: tables ======================== -->
 <div class="row row-deck row-cards mt-3">
     <div class="col-lg-6">
@@ -657,6 +719,7 @@
 {{ status_breakdown|json_script:"data-status" }}
 {{ history_choices|json_script:"data-status-labels" }}
 {{ kpis|json_script:"data-kpis" }}
+{{ spend_by_category|json_script:"data-categories" }}
 
 <script src="{% static 'tabler/js/chart.umd.min.js' %}"></script>
 <script>
@@ -716,6 +779,7 @@
         var statusCounts = readJSON("data-status");
         var choicePairs = readJSON("data-status-labels") || [];
         var kpis = readJSON("data-kpis") || {};
+        var categorySpend = readJSON("data-categories") || { total: "0.00", slices: [] };
 
         if (!flow || !weekly || !statusCounts || typeof Chart === "undefined") {
             return;
@@ -767,6 +831,75 @@
         }
 
         var charts = {};
+
+        /* Spend-by-category colours come from the same CSS variables as the rest
+           of the dashboard. The slice carries the model's colour *name*, and
+           "gray" has no --tblr-gray token, so it maps to --tblr-secondary --
+           the same substitution the categories page makes for its badge. */
+        var CATEGORY_TOKENS = {
+            blue: "--tblr-blue", green: "--tblr-green", orange: "--tblr-orange",
+            purple: "--tblr-purple", red: "--tblr-red", gray: "--tblr-secondary"
+        };
+
+        function categoryColor(name) {
+            return cssColor(CATEGORY_TOKENS[name] || "--tblr-secondary", "#94a3b8");
+        }
+
+        /* The list beside the doughnut is the legend, so the chart carries none.
+           Also re-applied by initCharts() on every theme rebuild. */
+        function renderCategoryChart() {
+            var canvas = document.getElementById("chart-category");
+            if (!canvas) { return; }
+            var chartEmpty = document.getElementById("category-chart-empty");
+            var list = document.getElementById("category-list");
+            var listEmpty = document.getElementById("category-list-empty");
+
+            var slices = (categorySpend && categorySpend.slices) || [];
+            var total = categorySpend ? num(categorySpend.total) : 0;
+
+            if (!slices.length || !total) {
+                canvas.classList.add("d-none");
+                if (chartEmpty) { chartEmpty.classList.remove("d-none"); }
+                if (list) { list.classList.add("d-none"); }
+                if (listEmpty) { listEmpty.classList.remove("d-none"); }
+                return;
+            }
+
+            canvas.classList.remove("d-none");
+            if (chartEmpty) { chartEmpty.classList.add("d-none"); }
+            if (list) { list.classList.remove("d-none"); }
+            if (listEmpty) { listEmpty.classList.add("d-none"); }
+
+            charts["chart-category"] = new Chart(canvas, {
+                type: "doughnut",
+                data: {
+                    labels: slices.map(function (s) { return s.name; }),
+                    datasets: [{
+                        data: slices.map(function (s) { return num(s.amount); }),
+                        backgroundColor: slices.map(function (s) { return categoryColor(s.color); }),
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    elements: { arc: { borderWidth: 0, hoverOffset: 6 } },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function (ctx) {
+                                    var slice = slices[ctx.dataIndex] || {};
+                                    return (slice.name || "") + ": " + fmtAmount(ctx.parsed) +
+                                        " (" + slice.percent + "%)";
+                                }
+                            }
+                        }
+                    },
+                    cutout: "75%"
+                }
+            });
+        }
 
         /* The period filter decides the window server-side, so the flow chart
            always plots the whole payload it was given. Past ~90 daily labels the
@@ -957,6 +1090,8 @@
                     }
                 }
             });
+
+            renderCategoryChart();
         }
 
         initCharts();

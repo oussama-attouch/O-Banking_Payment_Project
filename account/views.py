@@ -19,6 +19,7 @@ from account.analytics import (
     PERIOD_DAYS,
     PERIOD_SHORT,
     TYPE_FILTER_CHOICES,
+    get_spend_by_category,
 )
 from account.models import (
     KYC,
@@ -174,6 +175,9 @@ def dashboard(request):
         "history_status": history_status,
         "history_type": history_type,
         "history_q": history_q,
+        "spend_by_category": get_spend_by_category(
+            request.user, days=days, transaction_type=txn_type,
+        ),
         "history_choices": analytics.STATUS_CHOICES,
         "history_type_choices": analytics.TYPE_CHOICES,
         # The page-level filter, echoed back so the bar and the labels agree with
