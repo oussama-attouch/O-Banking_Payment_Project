@@ -51,6 +51,16 @@ def LoginView(request):
             user = authenticate(request, email=email, password=password)
 
             if user is not None: # if there is a user
+                # Phase C-2: if the user has a confirmed TOTP device, do not
+                # authenticate the session yet. Park the pending user in the
+                # session and send them to the challenge.
+                _device = TOTPDevice.objects.filter(user=user, is_confirmed=True).first()
+                if _device is not None:
+                    request.session["2fa_pending_user_id"] = user.pk
+                    request.session["2fa_pending_at"] = timezone.now().isoformat()
+                    request.session["2fa_pending_email"] = request.POST.get("email")
+                    return redirect("userauths:two_factor_challenge")
+
                 login(request, user)
                 audit_log("user_login", target=user)
                 reset_login_limit(request.POST.get("email"))
@@ -67,6 +77,104 @@ def LoginView(request):
         return redirect("account:account")
         
     return render(request, "userauths/sign-in.html")
+
+
+# =====================================================================
+# Phase C-2  TOTP challenge on login
+# =====================================================================
+@rate_limit(lambda r, *a, **k: f"2fa_challenge:{r.session.get('2fa_pending_user_id') or 'anon'}",
+            limit=10, window=15 * 60, label="2fa_challenge")
+def two_factor_challenge(request):
+    """Second-factor challenge during login. NOT decorated with
+    @login_required: the session is not authenticated yet.
+
+    Reads the pending user id from the session, checks the
+    submitted TOTP code first, then falls back to unused recovery
+    codes. On success calls login() and clears the pending state.
+    On failure logs 2fa_challenge_failed and re-renders.
+    """
+    from datetime import datetime, timedelta
+
+    PENDING_TIMEOUT_SECONDS = 5 * 60
+
+    pending_id = request.session.get("2fa_pending_user_id")
+    pending_at = request.session.get("2fa_pending_at")
+
+    # No pending challenge → nothing to do, back to sign-in.
+    if pending_id is None or pending_at is None:
+        # A half-written pending state (an id with no timestamp) is inert --
+        # every later request takes this same branch, so it can never reach
+        # login() -- but it should not be left behind either.
+        request.session.pop("2fa_pending_user_id", None)
+        request.session.pop("2fa_pending_at", None)
+        return redirect("userauths:sign-in")
+
+    # Expired pending challenge → drop it and go back to sign-in.
+    try:
+        started = datetime.fromisoformat(pending_at)
+    except (TypeError, ValueError):
+        request.session.pop("2fa_pending_user_id", None)
+        request.session.pop("2fa_pending_at", None)
+        return redirect("userauths:sign-in")
+
+    if timezone.now() - started > timedelta(seconds=PENDING_TIMEOUT_SECONDS):
+        request.session.pop("2fa_pending_user_id", None)
+        request.session.pop("2fa_pending_at", None)
+        messages.warning(request, "The two-factor session expired. Sign in again.")
+        return redirect("userauths:sign-in")
+
+    user = User.objects.filter(pk=pending_id).first()
+    if user is None:
+        request.session.pop("2fa_pending_user_id", None)
+        request.session.pop("2fa_pending_at", None)
+        return redirect("userauths:sign-in")
+
+    device = TOTPDevice.objects.filter(user=user, is_confirmed=True).first()
+    if device is None:
+        # The device was removed after the pending state was set.
+        # Proceed without 2FA (it is no longer enabled) but do not
+        # leave the pending state behind.
+        request.session.pop("2fa_pending_user_id", None)
+        request.session.pop("2fa_pending_at", None)
+        login(request, user)
+        audit_log("user_login", target=user, metadata={"2fa": "device_removed_mid_flow"})
+        return redirect("account:dashboard")
+
+    if request.method == "POST":
+        submitted = (request.POST.get("code") or "").strip().upper()
+
+        # 1) TOTP
+        if totp.verify_code(device.secret, submitted):
+            device.last_used_at = timezone.now()
+            device.save(update_fields=["last_used_at"])
+            request.session.pop("2fa_pending_user_id", None)
+            request.session.pop("2fa_pending_at", None)
+            login(request, user)
+            audit_log("2fa_challenge_passed", target=user, metadata={"method": "totp"})
+            audit_log("user_login", target=user, metadata={"2fa": "totp"})
+            reset_login_limit(request.session.get("2fa_pending_email") or user.email)
+            return redirect("account:dashboard")
+
+        # 2) Recovery code (any unused one)
+        for rc in device.recovery_codes.filter(is_used=False):
+            if totp.check_recovery_code(submitted, rc.code_hash):
+                rc.is_used = True
+                rc.used_at = timezone.now()
+                rc.save(update_fields=["is_used", "used_at"])
+                request.session.pop("2fa_pending_user_id", None)
+                request.session.pop("2fa_pending_at", None)
+                login(request, user)
+                audit_log("2fa_challenge_passed", target=user, metadata={"method": "recovery"})
+                audit_log("user_login", target=user, metadata={"2fa": "recovery"})
+                reset_login_limit(request.session.get("2fa_pending_email") or user.email)
+                return redirect("account:dashboard")
+
+        audit_log("2fa_challenge_failed", target=user,
+                  metadata={"code_length": len(submitted)})
+        return render(request, "userauths/2fa_challenge.html",
+                      {"error": "That code did not match. Try again."})
+
+    return render(request, "userauths/2fa_challenge.html", {})
 
 def logoutView(request):
     audit_log("user_logout")

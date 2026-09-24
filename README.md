@@ -2,7 +2,7 @@
 
 A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively-licensed UI.
 
-`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `206 tests passing`
+`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `218 tests passing`
 
 ## Table of contents
 
@@ -39,7 +39,7 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 ## Solution Overview
 
-**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 206 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
+**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 218 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
 **Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports: Django, django-jazzmin, django-import-export, shortuuid, and Pillow.
 
@@ -104,7 +104,7 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 - Notification center: a bell in the topbar with an unread badge, a 5-item dropdown, and a paginated list
 - Immutable audit log: append-only `LogEntry` for sensitive actions, with a read-only admin
 - Rate limiting on login, transfer, settlement, and payment-request confirmation
-- Optional TOTP two-factor authentication with single-use recovery codes
+- Optional TOTP two-factor authentication with single-use recovery codes and a session-parked challenge step
 - Support tickets: inline create, thread view, and staff replies from the admin
 - User settings: profile editing and password change
 - Public blog (list, detail, category filter) and a contact form
@@ -177,9 +177,13 @@ Login is limited to 5 attempts per email per 15 minutes; transfer, settlement, a
 
 `TOTPDevice.secret` is stored as a plaintext base32 string. That is a deliberate limitation for a demo project; production would use a KMS-backed encrypted field. The reasoning is recorded in `userauths/totp.py` and listed in Future Work. Recovery codes are stored as Django password hashes, so a database leak does not expose a working code.
 
+### m) The 2FA challenge parks the pending user in the session
+
+A correct password alone does not authenticate the session when the user has a confirmed TOTP device. `LoginView` sets `session["2fa_pending_user_id"]` and `session["2fa_pending_at"]` and redirects to the challenge view; `login()` is called only after a valid TOTP code or an unused recovery code. The pending state expires after five minutes. This is the security property the feature exists to guarantee: an attacker who has the password but not the second factor is left anonymous.
+
 ## Results
 
-- 206 tests, from 0 (three stubs, four lines)
+- 218 tests, from 0 (three stubs, four lines)
 - `static/` 13.99 MB → 2.38 MB (−83%, 206 files → 11)
 - 7 critical bugs from the original audit closed
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect
@@ -270,6 +274,7 @@ The audit and modernization ran as a numbered phase sequence — from the securi
 - Replace `"test" in sys.argv` with a dedicated settings module for stricter test-runner detection
 - A shared cache backend (Redis) for the rate limiter so the quota is enforced across multiple worker processes
 - Encrypt `TOTPDevice.secret` at rest with a KMS-managed key
+- Server-side TOTP replay prevention (cache the last accepted time-step per device so a code cannot be reused within its 30-second window)
 
 ## Author
 

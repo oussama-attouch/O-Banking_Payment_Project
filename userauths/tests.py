@@ -8,14 +8,17 @@ view depends on ``request.user.account`` existing.
 does not test the login challenge: that arrives in Phase C-2.
 """
 import re
+from datetime import timedelta
 from decimal import Decimal
 
 import pyotp
+from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from account.models import Account
+from audit.models import LogEntry
 from userauths import totp
 from userauths.models import TOTPDevice, TOTPRecoveryCode, User
 
@@ -273,3 +276,236 @@ class TwoFactorSetupTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], self.urls()["disable"])
         self.assertTrue(TOTPDevice.objects.filter(pk=device.pk).exists())
+
+
+# =====================================================================
+# Phase C-2  TOTP challenge on login
+# =====================================================================
+class TwoFactorChallengeTests(TestCase):
+    """The second factor gates the *session*, not just the page.
+
+    Every "authenticated" assertion reads the session, because the property
+    under test is that ``login()`` was never called: a visitor who stops at the
+    challenge must be anonymous even though the password was correct.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        # See core.tests: hardening follows DEBUG, and a secure session cookie is
+        # never sent back over plain HTTP, which would log every test out.
+        cls._hardening = override_settings(
+            SECURE_SSL_REDIRECT=False,
+            SESSION_COOKIE_SECURE=False,
+            CSRF_COOKIE_SECURE=False,
+        )
+        cls._hardening.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._hardening.disable()
+
+    def setUp(self):
+        # The challenge view is rate limited through Django's cache, which is
+        # process-wide and is NOT cleared between tests by Django itself. Both
+        # ends clear it: the window must not leak into this test, and a counter
+        # left at 11 for this pk must not refuse a later test's first attempt.
+        cache.clear()
+        self.alice = User.objects.create_user(
+            username="alice", email="alice@test.invalid", password=PASSWORD
+        )
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
+    # ------------------------------------------------------------- helpers
+    def url(self):
+        return reverse("userauths:two_factor_challenge")
+
+    def device(self, confirmed=True):
+        return TOTPDevice.objects.create(
+            user=self.alice,
+            secret=totp.generate_secret(),
+            is_confirmed=confirmed,
+            confirmed_at=timezone.now() if confirmed else None,
+        )
+
+    def add_recovery_codes(self, device, count=10):
+        """Store ten hashes and return the raw codes, as enrolment does."""
+        codes = totp.generate_recovery_codes()[:count]
+        for raw, code_hash in totp.hash_recovery_codes(codes):
+            TOTPRecoveryCode.objects.create(device=device, code_hash=code_hash)
+        return codes
+
+    def current_code(self, device):
+        return pyotp.TOTP(device.secret).now()
+
+    def wrong_code(self, device):
+        """"000000" unless this run happens to be the one-in-a-million match."""
+        return "000000" if self.current_code(device) != "000000" else "111111"
+
+    def start_login(self, client=None):
+        client = client or self.client
+        return client.post(reverse("userauths:sign-in"),
+                           {"email": self.alice.email, "password": PASSWORD})
+
+    def post_code(self, code, client=None):
+        client = client or self.client
+        return client.post(self.url(), {"code": code})
+
+    def is_authenticated(self, client=None):
+        client = client or self.client
+        return "_auth_user_id" in client.session
+
+    # ------------------------------------------------------------- the gate
+    def test_login_without_device_unchanged(self):
+        resp = self.start_login()
+        self.assertEqual(resp.status_code, 302)
+        # LoginView's own target, untouched by this phase.
+        self.assertEqual(resp["Location"], reverse("account:account"))
+        self.assertTrue(self.is_authenticated())
+        self.assertIsNone(self.client.session.get("2fa_pending_user_id"))
+
+    def test_login_with_device_redirects_to_challenge(self):
+        self.device()
+        resp = self.start_login()
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+        # The security property: a correct password alone authenticates nothing.
+        self.assertFalse(self.is_authenticated())
+        self.assertEqual(self.client.session.get("2fa_pending_user_id"), self.alice.pk)
+
+    def test_challenge_requires_pending_session(self):
+        resp = Client().get(self.url())
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    # ------------------------------------------------------------- success
+    def test_challenge_with_valid_totp_logs_in(self):
+        device = self.device()
+        self.start_login()
+
+        resp = self.post_code(self.current_code(device))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("account:dashboard"))
+        self.assertTrue(self.is_authenticated())
+
+        device.refresh_from_db()
+        self.assertIsNotNone(device.last_used_at)
+
+    def test_challenge_with_recovery_code_logs_in(self):
+        device = self.device()
+        codes = self.add_recovery_codes(device)
+        self.start_login()
+
+        resp = self.post_code(codes[0])
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("account:dashboard"))
+        self.assertTrue(self.is_authenticated())
+
+        used = TOTPRecoveryCode.objects.filter(device=device, is_used=True)
+        self.assertEqual(used.count(), 1)
+        self.assertIsNotNone(used.get().used_at)
+        self.assertTrue(totp.check_recovery_code(codes[0], used.get().code_hash))
+
+    def test_recovery_code_can_only_be_used_once(self):
+        device = self.device()
+        codes = self.add_recovery_codes(device)
+        self.start_login()
+        self.post_code(codes[0])
+        self.assertTrue(self.is_authenticated())
+
+        fresh = Client()
+        self.start_login(client=fresh)
+        resp = self.post_code(codes[0], client=fresh)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "did not match")
+        self.assertFalse(self.is_authenticated(client=fresh))
+
+    # ------------------------------------------------------------- refusal
+    def test_challenge_with_invalid_code_rejects(self):
+        device = self.device()
+        self.start_login()
+
+        resp = self.post_code(self.wrong_code(device))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "did not match")
+        self.assertFalse(self.is_authenticated())
+        # Still pending: the visitor may try again until the window closes.
+        self.assertEqual(self.client.session.get("2fa_pending_user_id"), self.alice.pk)
+
+    def test_challenge_expires_after_timeout(self):
+        session = self.client.session
+        session["2fa_pending_user_id"] = self.alice.pk
+        session["2fa_pending_at"] = (timezone.now() - timedelta(minutes=6)).isoformat()
+        session.save()
+
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+        self.assertIsNone(self.client.session.get("2fa_pending_user_id"))
+        self.assertIsNone(self.client.session.get("2fa_pending_at"))
+
+    def test_challenge_with_no_pending_at_rejects(self):
+        session = self.client.session
+        session["2fa_pending_user_id"] = self.alice.pk
+        session.save()
+
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+        self.assertIsNone(self.client.session.get("2fa_pending_user_id"))
+
+    def test_challenge_rate_limited(self):
+        device = self.device()
+        self.start_login()
+        wrong = self.wrong_code(device)
+
+        for attempt in range(1, 11):
+            with self.subTest(attempt=attempt):
+                resp = self.post_code(wrong)
+                self.assertNotEqual(resp.status_code, 429,
+                                    "attempt %d was refused too early" % attempt)
+
+        resp = self.post_code(wrong)
+        self.assertEqual(resp.status_code, 429)
+        self.assertContains(resp, "Too many requests", status_code=429)
+        self.assertFalse(self.is_authenticated())
+
+    # ------------------------------------------------------------- audit
+    def test_challenge_writes_audit_entries(self):
+        device = self.device()
+        self.start_login()
+        self.post_code(self.current_code(device))
+
+        passed = LogEntry.objects.filter(action="2fa_challenge_passed")
+        self.assertEqual(passed.count(), 1)
+        self.assertEqual(passed.get().metadata.get("method"), "totp")
+        self.assertEqual(passed.get().actor, self.alice)
+
+        other = Client()
+        self.start_login(client=other)
+        self.post_code(self.wrong_code(device), client=other)
+
+        failed = LogEntry.objects.filter(action="2fa_challenge_failed")
+        self.assertEqual(failed.count(), 1)
+        # The failed challenge happens *before* login(), so the request is still
+        # anonymous and the row has no actor. It is still attributable: the log
+        # call passes the user under challenge as the target.
+        self.assertIsNone(failed.get().actor)
+        self.assertEqual(failed.get().target_id, str(self.alice.pk))
+        self.assertEqual(failed.get().metadata.get("code_length"), 6)
+        # A failed challenge must not look like a successful login.
+        self.assertEqual(
+            LogEntry.objects.filter(action="user_login", metadata__2fa="totp").count(), 1
+        )
+
+    def test_pending_state_cleared_on_success(self):
+        device = self.device()
+        self.start_login()
+        self.post_code(self.current_code(device))
+
+        self.assertIsNone(self.client.session.get("2fa_pending_user_id"))
+        self.assertIsNone(self.client.session.get("2fa_pending_at"))
