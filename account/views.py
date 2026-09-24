@@ -27,14 +27,17 @@ from account.models import (
     Category,
     Notification,
     Recipient,
+    SavingsGoal,
     SupportReply,
     SupportTicket,
 )
 from account.forms import (
+    AddToGoalForm,
     CategoryForm,
     KYCForm,
     ProfileForm,
     RecipientForm,
+    SavingsGoalForm,
     SupportReplyForm,
     SupportTicketForm,
 )
@@ -192,6 +195,13 @@ def dashboard(request):
         # "All time" has no window before it, so the delta labels have nothing
         # to compare against and the template says so.
         "compare_label": None if days is None else dict(PERIOD_CHOICES)[period],
+        # Phase F-2. The two most recent active goals, for the compact
+        # "Savings goals" card below the history. A plain queryset: the
+        # template checks truthiness, so a user with no goals renders no card
+        # and costs no extra query.
+        "active_goals": (SavingsGoal.objects
+                         .filter(user=request.user, is_completed=False)
+                         .order_by("-created_at")[:2]),
     }
     return render(request, "account/dashboard.html", context)
 
@@ -1040,3 +1050,121 @@ def category_delete(request, pk):
     else:
         messages.success(request, f"Category “{name}” removed.")
     return redirect("account:categories")
+
+
+# =====================================================================
+# Phase F-2  savings goals
+# =====================================================================
+@login_required
+def goals_view(request):
+    """List the user's savings goals; POST creates a new one.
+
+    Login-only, like categories and support: a savings goal is the user's
+    own bookkeeping, not banking data, so it does not go through
+    ``_kyc_required``. Progress is recorded by the user here; nothing in
+    this module touches a balance or the transfer flow.
+    """
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    if request.method == "POST":
+        form = SavingsGoalForm(request.POST)
+        if form.is_valid():
+            goal = form.save(commit=False)
+            goal.user = request.user
+            goal.save()
+            audit_log("settings_changed", target=goal,
+                      metadata={"goal": "created", "name": goal.name})
+            messages.success(request, f"Goal “{goal.name}” created.")
+            return redirect("account:goals")
+    else:
+        form = SavingsGoalForm()
+
+    active = (SavingsGoal.objects
+              .filter(user=request.user, is_completed=False)
+              .order_by("-created_at"))
+    completed = (SavingsGoal.objects
+                 .filter(user=request.user, is_completed=True)
+                 .order_by("-updated_at")[:20])
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "form": form,
+        "active_goals": active,
+        "completed_goals": completed,
+        "add_form": AddToGoalForm(),
+    }
+    return render(request, "account/goals.html", context)
+
+
+@login_required
+@require_POST
+def goal_add(request, pk):
+    """Add to a goal's current_amount. POST-only, scoped to user.
+
+    ``login_required`` sits outside ``require_POST`` on purpose: an anonymous
+    GET is a sign-in redirect, an authenticated GET is a 405. The queryset is
+    scoped to ``request.user``, so another user's pk is a no-op rather than a
+    permission error that would confirm the row exists.
+    """
+    goal = SavingsGoal.objects.filter(pk=pk, user=request.user).first()
+    if goal is None:
+        messages.warning(request, "Goal not found.")
+        return redirect("account:goals")
+
+    form = AddToGoalForm(request.POST)
+    if not form.is_valid():
+        messages.warning(request, "Please enter a valid amount.")
+        return redirect("account:goals")
+
+    goal.current_amount = (goal.current_amount or Decimal("0.00")) + form.cleaned_data["amount"]
+    # Auto-complete when the target is reached.
+    if goal.current_amount >= goal.target_amount and not goal.is_completed:
+        goal.is_completed = True
+    goal.save(update_fields=["current_amount", "is_completed", "updated_at"])
+
+    audit_log("settings_changed", target=goal,
+              metadata={"goal": "contrib", "amount": str(form.cleaned_data["amount"])})
+    messages.success(request, f"Added to “{goal.name}”.")
+    return redirect("account:goals")
+
+
+@login_required
+@require_POST
+def goal_complete(request, pk):
+    """Toggle is_completed on the goal. POST-only, scoped to user.
+
+    A toggle rather than a one-way "complete": the completed list offers a
+    "Reopen" button, and both directions go through this one view so the
+    audit entry reads the same either way.
+    """
+    goal = SavingsGoal.objects.filter(pk=pk, user=request.user).first()
+    if goal is None:
+        messages.warning(request, "Goal not found.")
+        return redirect("account:goals")
+    goal.is_completed = not goal.is_completed
+    goal.save(update_fields=["is_completed", "updated_at"])
+    audit_log("settings_changed", target=goal,
+              metadata={"goal": "toggled", "completed": goal.is_completed})
+    return redirect("account:goals")
+
+
+@login_required
+@require_POST
+def goal_delete(request, pk):
+    """Delete one of the user's goals. POST-only, scoped to user.
+
+    The audit entry targets the user, not the goal: the row is gone by the
+    time the entry is written, so its pk would point at nothing.
+    """
+    goal = SavingsGoal.objects.filter(pk=pk, user=request.user).first()
+    if goal is None:
+        messages.warning(request, "Goal not found.")
+        return redirect("account:goals")
+    name = goal.name
+    goal.delete()
+    audit_log("settings_changed", target=request.user,
+              metadata={"goal": "deleted", "name": name})
+    messages.success(request, f"Goal “{name}” deleted.")
+    return redirect("account:goals")

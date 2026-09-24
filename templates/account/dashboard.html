@@ -678,6 +678,47 @@
     {% endif %}
 </div>
 
+<!-- ==================== Row: savings goals (F-2) ====================== -->
+{% comment %}
+Rendered only when the signed-in user has at least one active goal, so a
+user who never opens the Goals page sees no empty card. The progress-bar
+width is the one inline style here: it is a runtime percentage and no
+Tabler utility sets an arbitrary width.
+{% endcomment %}
+{% if active_goals %}
+<div class="row row-cards mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h2 class="card-title mb-0">Savings goals</h2>
+                <a href="{% url 'account:goals' %}" class="text-secondary small">
+                    Manage goals
+                </a>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    {% for g in active_goals %}
+                    <div class="col-md-6">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="fw-medium">{{ g.name }}</span>
+                            <span class="text-secondary small">{{ g.progress_percent }}%</span>
+                        </div>
+                        <div class="progress mb-1">
+                            <div class="progress-bar" style="width: {{ g.progress_percent }}%;"></div>
+                        </div>
+                        <div class="text-secondary small">
+                            {{ g.current_amount }} of {{ g.target_amount }}
+                            {% if g.deadline %}· due {{ g.deadline|date:"M j, Y" }}{% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- ========================== Row 6: KYC status ======================== -->
 <div class="row row-deck row-cards mt-3">
     <div class="col-12">

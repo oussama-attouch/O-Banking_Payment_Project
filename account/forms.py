@@ -1,6 +1,6 @@
 from django import forms 
 from django.contrib.auth.forms import PasswordChangeForm
-from account.models import Category, KYC
+from account.models import Category, KYC, SavingsGoal
 from django.forms import ImageField, FileInput, DateInput
 from userauths.models import User
 
@@ -181,3 +181,69 @@ class CategoryForm(forms.ModelForm):
 
     def clean_name(self):
         return (self.cleaned_data.get("name") or "").strip()
+
+
+class SavingsGoalForm(forms.ModelForm):
+    """Create a savings goal: a name, a target, and an optional date.
+
+    ``current_amount`` and ``is_completed`` are deliberately absent. A goal
+    starts at zero -- the model's default -- and only ``account:goal_add``
+    moves it, so the create form cannot open a goal that already claims to
+    be part-funded.
+    """
+
+    class Meta:
+        model = SavingsGoal
+        fields = ["name", "target_amount", "deadline"]
+        widgets = {
+            "name": forms.TextInput(attrs={
+                "class": "form-control",
+                "placeholder": "e.g. Emergency fund, Japan trip",
+                "autocomplete": "off",
+            }),
+            "target_amount": forms.NumberInput(attrs={
+                "class": "form-control",
+                "min": "0.01", "step": "0.01",
+                "placeholder": "0.00",
+            }),
+            "deadline": forms.DateInput(attrs={
+                "class": "form-control", "type": "date",
+            }),
+        }
+
+    def clean_target_amount(self):
+        v = self.cleaned_data.get("target_amount")
+        if v is None or v <= 0:
+            raise forms.ValidationError(
+                "Target must be greater than zero."
+            )
+        return v
+
+    def clean_deadline(self):
+        d = self.cleaned_data.get("deadline")
+        # deadline is optional; no validation beyond the widget.
+        return d
+
+
+class AddToGoalForm(forms.Form):
+    """Record a contribution to an existing goal.
+
+    A plain ``Form``, not a ``ModelForm``: the view owns which goal is
+    credited, so the only input here is the amount. ``min_value=0`` is a
+    floor, not the rule -- ``clean_amount`` rejects zero as well, because a
+    contribution of nothing is not a contribution.
+    """
+
+    amount = forms.DecimalField(
+        max_digits=12, decimal_places=2, min_value=0,
+        widget=forms.NumberInput(attrs={
+            "class": "form-control form-control-sm",
+            "min": "0", "step": "0.01", "placeholder": "0.00",
+        }),
+    )
+
+    def clean_amount(self):
+        v = self.cleaned_data.get("amount")
+        if v is None or v <= 0:
+            raise forms.ValidationError("Amount must be greater than zero.")
+        return v

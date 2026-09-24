@@ -2552,3 +2552,195 @@ class SavingsGoalModelTests(TestCase):
     def test_is_overdue_false_when_no_deadline(self):
         goal = self.make_goal(deadline=None)
         self.assertFalse(goal.is_overdue)
+
+
+# =====================================================================
+# Phase F-2  the savings-goals page and the dashboard widget
+# =====================================================================
+class SavingsGoalViewTests(DashboardAnalyticsTestBase):
+    """``account:goals`` and its three POST-only actions, plus the dashboard
+    widget.
+
+    alice is signed in by the base class and has KYC, so the dashboard
+    renders for her; bob exists so the cross-user scoping is exercised
+    against a real second user rather than an invented pk. Every test
+    builds its own goal -- the base class seeds accounts, not goals.
+    """
+
+    def url(self):
+        return reverse("account:goals")
+
+    def make_goal(self, user=None, name="Trip", target="1000.00", **kwargs):
+        return SavingsGoal.objects.create(
+            user=user or self.alice,
+            name=name,
+            target_amount=Decimal(target),
+            **kwargs
+        )
+
+    def add(self, goal, amount):
+        return self.client.post(
+            reverse("account:goal_add", args=[goal.pk]), {"amount": amount}
+        )
+
+    # ------------------------------------------------------------ access
+
+    def test_goals_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_goals_renders_empty(self):
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Create a goal")
+        self.assertContains(resp, "Active goals")
+        self.assertContains(resp, "No active goals")
+
+    # ------------------------------------------------------------ create
+
+    def test_goal_create(self):
+        resp = self.client.post(
+            self.url(), {"name": "Trip", "target_amount": "1000"}
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+
+        goal = SavingsGoal.objects.get(user=self.alice)
+        self.assertEqual(goal.name, "Trip")
+        self.assertEqual(goal.target_amount, Decimal("1000.00"))
+        self.assertEqual(goal.current_amount, Decimal("0.00"))
+        self.assertFalse(goal.is_completed)
+
+    def test_goal_create_rejects_zero_target(self):
+        resp = self.client.post(
+            self.url(), {"name": "Trip", "target_amount": "0"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Target must be greater than zero.")
+        self.assertEqual(SavingsGoal.objects.filter(user=self.alice).count(), 0)
+
+    # ------------------------------------------------------- contributions
+
+    def test_goal_add_increases_current(self):
+        goal = self.make_goal(target="1000.00")
+
+        resp = self.add(goal, "100")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+
+        goal.refresh_from_db()
+        self.assertEqual(goal.current_amount, Decimal("100.00"))
+        self.assertFalse(goal.is_completed)
+
+    def test_goal_add_auto_completes_on_reach(self):
+        goal = self.make_goal(target="100.00")
+
+        self.assertEqual(self.add(goal, "100").status_code, 302)
+
+        goal.refresh_from_db()
+        self.assertTrue(goal.is_completed)
+
+        # On the next GET it has left the active list and sits under
+        # "Completed goals". The slice starts after the "Active goals"
+        # heading, because the success message above the cards also names
+        # the goal.
+        body = self.client.get(self.url()).content.decode()
+        active_part, _, completed_part = (
+            body.split("Active goals", 1)[1].partition("Completed goals")
+        )
+        self.assertTrue(completed_part, "the completed card did not render")
+        self.assertIn("No active goals", active_part)
+        self.assertNotIn("Trip", active_part)
+        self.assertIn("Trip", completed_part)
+
+    def test_goal_add_rejects_zero(self):
+        goal = self.make_goal(target="1000.00")
+
+        resp = self.client.post(
+            reverse("account:goal_add", args=[goal.pk]),
+            {"amount": "0"},
+            follow=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Please enter a valid amount.")
+
+        goal.refresh_from_db()
+        self.assertEqual(goal.current_amount, Decimal("0.00"))
+
+    # ----------------------------------------------------- complete/delete
+
+    def test_goal_complete_toggles(self):
+        goal = self.make_goal()
+        pk_url = reverse("account:goal_complete", args=[goal.pk])
+
+        self.assertEqual(self.client.post(pk_url).status_code, 302)
+        goal.refresh_from_db()
+        self.assertTrue(goal.is_completed)
+
+        self.assertEqual(self.client.post(pk_url).status_code, 302)
+        goal.refresh_from_db()
+        self.assertFalse(goal.is_completed)
+
+    def test_goal_delete(self):
+        goal = self.make_goal()
+
+        resp = self.client.post(reverse("account:goal_delete", args=[goal.pk]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+        self.assertFalse(SavingsGoal.objects.filter(pk=goal.pk).exists())
+
+    def test_goal_delete_other_user_rejected(self):
+        theirs = self.make_goal(user=self.bob, name="Bob's goal")
+
+        resp = self.client.post(
+            reverse("account:goal_delete", args=[theirs.pk]), follow=True
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Goal not found.")
+        self.assertTrue(SavingsGoal.objects.filter(pk=theirs.pk).exists())
+
+    def test_goal_views_require_post(self):
+        goal = self.make_goal()
+        for name in ("goal_add", "goal_complete", "goal_delete"):
+            resp = self.client.get(reverse("account:%s" % name, args=[goal.pk]))
+            self.assertEqual(resp.status_code, 405, name)
+        goal.refresh_from_db()
+        self.assertFalse(goal.is_completed)
+
+    # ---------------------------------------------------------- dashboard
+
+    def test_dashboard_shows_goals_widget(self):
+        # created_at is auto_now_add, so only an UPDATE can order these. The
+        # widget takes the two newest, which must therefore be "Widget Two"
+        # and "Widget Three", in that order.
+        older = self.make_goal(name="Widget One")
+        middle = self.make_goal(name="Widget Two")
+        newest = self.make_goal(name="Widget Three")
+        now = timezone.now()
+        SavingsGoal.objects.filter(pk=older.pk).update(
+            created_at=now - timedelta(days=2)
+        )
+        SavingsGoal.objects.filter(pk=middle.pk).update(
+            created_at=now - timedelta(days=1)
+        )
+        SavingsGoal.objects.filter(pk=newest.pk).update(created_at=now)
+
+        resp = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Savings goals")
+        self.assertContains(resp, "Manage goals")
+        self.assertContains(resp, "Widget Two")
+        self.assertContains(resp, "Widget Three")
+        self.assertNotContains(resp, "Widget One")
+
+        body = resp.content.decode()
+        self.assertLess(body.index("Widget Three"), body.index("Widget Two"))
+
+        # No goals at all: the card is not rendered, heading included.
+        SavingsGoal.objects.filter(user=self.alice).delete()
+        resp = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Savings goals")
+        self.assertNotContains(resp, "Manage goals")
