@@ -3,12 +3,14 @@ import datetime
 from decimal import Decimal
 
 from django.core.paginator import Paginator
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
 from account import analytics
@@ -21,12 +23,14 @@ from account.analytics import (
 from account.models import (
     KYC,
     Account,
+    Category,
     Notification,
     Recipient,
     SupportReply,
     SupportTicket,
 )
 from account.forms import (
+    CategoryForm,
     KYCForm,
     ProfileForm,
     RecipientForm,
@@ -945,3 +949,90 @@ def support_detail(request, pk):
         "form": form,
     }
     return render(request, "account/support_detail.html", context)
+
+
+# =====================================================================
+# Phase E-2a  budget categories
+# =====================================================================
+@login_required
+def categories_view(request):
+    """List the user's categories and render the add form inline.
+
+    POST to this view creates a new category. Slug is derived
+    from the name; per-user uniqueness is enforced by the model
+    constraint, caught here as IntegrityError and surfaced as a
+    field error.
+    """
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    if request.method == "POST":
+        form = CategoryForm(request.POST)
+        if form.is_valid():
+            name = form.cleaned_data["name"]
+            slug = slugify(name)[:50] or "category"
+            try:
+                # The savepoint matters: a unique violation aborts the
+                # surrounding transaction on PostgreSQL and under
+                # ATOMIC_REQUESTS, and the re-render below would then raise
+                # TransactionManagementError instead of showing the error.
+                with transaction.atomic():
+                    category = Category.objects.create(
+                        user=request.user,
+                        name=name,
+                        slug=slug,
+                        icon=form.cleaned_data["icon"],
+                        color=form.cleaned_data["color"],
+                    )
+                audit_log("settings_changed", target=category,
+                          metadata={"category": "created"})
+                messages.success(request, f"Category “{category.name}” added.")
+                return redirect("account:categories")
+            except IntegrityError:
+                form.add_error("name",
+                    "You already have a category with this name.")
+    else:
+        form = CategoryForm()
+
+    # Annotate each category with its usage count in one query.
+    cats = (Category.objects
+            .filter(user=request.user)
+            .annotate(txn_count=Count("transactions")))
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "form": form,
+        "categories": cats,
+    }
+    return render(request, "account/categories.html", context)
+
+
+@login_required
+@require_POST
+def category_delete(request, pk):
+    """Delete one of the user's categories. POST-only.
+
+    SET_NULL on Transaction.category means existing transactions
+    are preserved; their category becomes NULL. The view warns
+    the user if any transactions were attached.
+    """
+    category = Category.objects.filter(pk=pk, user=request.user).first()
+    if category is None:
+        messages.warning(request, "Category not found.")
+        return redirect("account:categories")
+
+    txn_count = category.transactions.count()
+    name = category.name
+    category.delete()
+    audit_log("settings_changed", target=request.user,
+              metadata={"category": "deleted", "name": name,
+                        "detached_transactions": txn_count})
+
+    if txn_count:
+        messages.success(request,
+            f"Category “{name}” removed. {txn_count} transaction"
+            f"{'s' if txn_count != 1 else ''} moved to Uncategorized.")
+    else:
+        messages.success(request, f"Category “{name}” removed.")
+    return redirect("account:categories")

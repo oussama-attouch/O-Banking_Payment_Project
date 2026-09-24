@@ -2233,3 +2233,108 @@ class CategoryTests(TestCase):
             [c.name for c in Category.objects.filter(user=user)],
             ["Alpha", "Bravo", "Charlie"],
         )
+
+
+# =====================================================================
+# Phase E-2a  the /account/categories/ page
+# =====================================================================
+class CategoryViewTests(DashboardAnalyticsTestBase):
+    """List, add, and remove categories through the real views.
+
+    Login-only, like recipients and support: a category list is the user's own
+    bookkeeping, so the KYC gate does not apply.
+    """
+
+    def url(self):
+        return reverse("account:categories")
+
+    def add(self, name, icon="dots", color="gray"):
+        return self.client.post(self.url(),
+                                {"name": name, "icon": icon, "color": color})
+
+    def test_categories_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_categories_renders_six_defaults(self):
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.context["categories"]), 6)
+        self.assertContains(resp, "Add a category")
+        self.assertContains(resp, "Your categories")
+
+    def test_categories_create_success(self):
+        resp = self.add("Restaurants", icon="ticket", color="orange")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+
+        category = Category.objects.get(user=self.alice, slug="restaurants")
+        self.assertEqual(category.name, "Restaurants")
+        self.assertEqual(category.icon, "ticket")
+        self.assertEqual(category.color, "orange")
+
+    def test_categories_create_slug_derived(self):
+        self.assertEqual(self.add("My New Category").status_code, 302)
+        self.assertTrue(
+            Category.objects.filter(user=self.alice, slug="my-new-category").exists()
+        )
+
+    def test_categories_create_duplicate_rejected(self):
+        before = Category.objects.filter(user=self.alice).count()
+        resp = self.add("Groceries")  # slug "groceries" already exists
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "You already have a category with this name.")
+        self.assertEqual(Category.objects.filter(user=self.alice).count(), before)
+
+    def test_categories_delete_requires_post(self):
+        category = Category.objects.filter(user=self.alice).first()
+        resp = self.client.get(
+            reverse("account:category_delete", args=[category.pk])
+        )
+        self.assertEqual(resp.status_code, 405)
+
+    def test_categories_delete_own(self):
+        category = Category.objects.filter(user=self.alice, slug="groceries").get()
+        resp = self.client.post(
+            reverse("account:category_delete", args=[category.pk])
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+        self.assertFalse(Category.objects.filter(pk=category.pk).exists())
+
+    def test_categories_delete_other_user_rejected(self):
+        theirs = Category.objects.filter(user=self.bob, slug="groceries").get()
+        resp = self.client.post(
+            reverse("account:category_delete", args=[theirs.pk]), follow=True
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Category not found.")
+        self.assertTrue(Category.objects.filter(pk=theirs.pk).exists())
+
+    def test_categories_delete_detaches_transactions(self):
+        category = Category.objects.filter(user=self.alice, slug="housing").get()
+        txn = self.make_txn(self.alice, self.bob, "42.00", description="rent")
+        txn.category = category
+        txn.save()
+
+        resp = self.client.post(
+            reverse("account:category_delete", args=[category.pk]), follow=True
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "moved to Uncategorized")
+
+        txn.refresh_from_db()
+        self.assertIsNone(txn.category_id)
+        self.assertTrue(Transaction.objects.filter(pk=txn.pk).exists())
+
+    def test_categories_sidebar_link_active(self):
+        body = self.client.get(self.url()).content.decode()
+
+        active = re.findall(r"<li class=\"nav-item\">(.*?)</li>", body, re.S)
+        active = [block for block in active if "nav-link active" in block]
+        self.assertEqual(len(active), 1, "exactly one sidebar item is active")
+        self.assertIn("account/categories/", active[0])
+        self.assertIn("Categories", active[0])

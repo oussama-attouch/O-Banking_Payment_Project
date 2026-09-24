@@ -1,6 +1,6 @@
 from django import forms 
 from django.contrib.auth.forms import PasswordChangeForm
-from account.models import KYC
+from account.models import Category, KYC
 from django.forms import ImageField, FileInput, DateInput
 from userauths.models import User
 
@@ -154,3 +154,30 @@ class SupportReplyForm(forms.Form):
         }),
         label="Reply",
     )
+
+
+class CategoryForm(forms.ModelForm):
+    """Add a budget category.
+
+    ``slug`` is deliberately absent: the view derives it from the name, so the
+    user cannot create two categories whose names differ only in punctuation.
+    Uniqueness is not checked here either -- the model's
+    ``unique_category_per_user`` constraint is the single source of truth, and
+    the view turns the resulting ``IntegrityError`` into a field error.
+    """
+
+    class Meta:
+        model = Category
+        fields = ["name", "icon", "color"]
+        widgets = {
+            "name": forms.TextInput(attrs={
+                "class": "form-control",
+                "placeholder": "e.g. Restaurants, Travel, Savings",
+                "autocomplete": "off",
+            }),
+            "icon": forms.Select(attrs={"class": "form-select"}),
+            "color": forms.Select(attrs={"class": "form-select"}),
+        }
+
+    def clean_name(self):
+        return (self.cleaned_data.get("name") or "").strip()
