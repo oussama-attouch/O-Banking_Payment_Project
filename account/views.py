@@ -36,6 +36,7 @@ from account.forms import (
 from core.models import Transaction
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from audit.utils import log as audit_log
 
 def _kyc_required(request):
     """Shared gate for the dashboard views.
@@ -285,6 +286,7 @@ def kyc_registration(request):
             # deliberately left alone -- confirming identity is an admin action,
             # not something the submitter can assert.
             Account.objects.filter(pk=account.pk).update(kyc_submitted=True)
+            audit_log("kyc_submitted", target=new_form)
 
             # Show a success message and redirect to the account dashboard
             messages.success(request, "KYC Form submitted successfully. It's now under review.")
@@ -332,6 +334,7 @@ def settings_view(request):
         profile_form = ProfileForm(request.POST, instance=request.user)
         if profile_form.is_valid():
             profile_form.save()
+            audit_log("settings_changed", target=request.user)
             messages.success(request, "Your profile has been updated.")
             return redirect("account:settings")
     else:
@@ -718,11 +721,12 @@ def recipients_view(request):
                 form.add_error("account_number",
                     "You have already saved this account.")
             else:
-                Recipient.objects.create(
+                recipient = Recipient.objects.create(
                     user=request.user,
                     target_account=target,
                     nickname=form.cleaned_data.get("nickname", "").strip(),
                 )
+                audit_log("recipient_added", target=recipient)
                 messages.success(request, "Recipient saved.")
                 return redirect("account:recipients")
     else:
@@ -757,6 +761,7 @@ def recipient_delete(request, pk):
         messages.warning(request, "Recipient not found.")
         return redirect("account:recipients")
     label = recipient.display_name
+    audit_log("recipient_removed", metadata={"display_name": label})
     recipient.delete()
     messages.success(request, f"Removed {label}.")
     return redirect("account:recipients")
@@ -861,6 +866,7 @@ def support_view(request):
                 author=request.user,
                 body=form.cleaned_data["message"].strip(),
             )
+            audit_log("support_ticket_created", target=ticket)
             # No ticket.save() on purpose: the ticket was just INSERTed with
             # auto_now's now(), and Phase 5h-1 established that creating a
             # reply does not move updated_at, so it is already correct.
@@ -909,11 +915,12 @@ def support_detail(request, pk):
 
         form = SupportReplyForm(request.POST)
         if form.is_valid():
-            SupportReply.objects.create(
+            reply = SupportReply.objects.create(
                 ticket=ticket,
                 author=request.user,
                 body=form.cleaned_data["body"].strip(),
             )
+            audit_log("support_reply_created", target=reply)
             # Carry-over from Phase 5h-1: SupportReply.save() does not touch
             # the parent, so bump it explicitly. Without this the thread would
             # not rise to the top of Meta.ordering = ["-updated_at"].

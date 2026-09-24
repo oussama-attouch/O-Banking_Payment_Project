@@ -4,6 +4,7 @@ from django.contrib import messages
 
 from userauths.models import User
 from userauths.forms import UserRegisterForm
+from audit.utils import log as audit_log
 
 def RegisterView(request):
     if request.method == "POST":
@@ -18,6 +19,7 @@ def RegisterView(request):
             new_user = authenticate(username=form.cleaned_data['email'],
                                     password=form.cleaned_data['password1'])
             login(request, new_user)
+            audit_log("user_register", target=new_user)
             return redirect("account:account")
     
     if request.user.is_authenticated:
@@ -44,6 +46,7 @@ def LoginView(request):
 
             if user is not None: # if there is a user
                 login(request, user)
+                audit_log("user_login", target=user)
                 messages.success(request, "You are logged.")
                 return redirect("account:account")
             else:
@@ -59,6 +62,7 @@ def LoginView(request):
     return render(request, "userauths/sign-in.html")
 
 def logoutView(request):
+    audit_log("user_logout")
     logout(request)
     messages.success(request, "You have been logged out.")
     return redirect("core:index")

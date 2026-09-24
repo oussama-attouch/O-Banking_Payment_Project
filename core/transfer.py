@@ -6,6 +6,7 @@ from django.db.models import Q
 from django.contrib import messages
 from core.models import Transaction
 from core.security import AmountError, find_party_transaction, parse_amount
+from audit.utils import log as audit_log
 
 # Apply the login_required decorator to the function
 @login_required
@@ -96,6 +97,7 @@ def process_amount_transfer(request, account_number):
                 transaction_type="transfer",
             )
             new_transaction.save()
+            audit_log("transfer_created", target=new_transaction)
 
             # Get the ID of the transaction that was created now
             transaction_id = new_transaction.transaction_id
@@ -231,6 +233,7 @@ def TransferProcess(request, account_number, transaction_id):
                     receiver_row.account_balance += locked_txn.amount
                     receiver_row.save()
 
+                    audit_log("transfer_confirmed", target=locked_txn)  # in-atomic: rolls back with the money
             if mismatch:
                 messages.warning(request, "This transaction does not match the account in the link.")
                 return redirect("core:transactions")

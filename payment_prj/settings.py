@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     'core',
     'userauths',
     'account',
+    "audit",
     # Marketing content: the public blog and contact pages.
     'pages',
 ]
@@ -85,6 +86,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    "audit.middleware.AuditContextMiddleware",
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

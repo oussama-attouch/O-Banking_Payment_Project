@@ -8,6 +8,7 @@ from core.models import Transaction  # Import the Transaction model from the 'co
 from decimal import Decimal  # Import the Decimal class for precise decimal arithmetic
 from core.security import AmountError, find_party_transaction, parse_amount
 from django.views.decorators.http import require_POST
+from audit.utils import log as audit_log
 
 # Require authentication for this view using the @login_required decorator
 @login_required
@@ -86,6 +87,7 @@ def AmountRequestProcess(request, account_number):
             transaction_type="request"
         )
         new_request.save()
+        audit_log("request_created", target=new_request)
         transaction_id = new_request.transaction_id
         return redirect("core:amount-request-confirmation", account.account_number, transaction_id)
     else:
@@ -131,6 +133,7 @@ def AmountRequestFinalProcess(request, account_number,transaction_id):
         if request.user.check_password(submitted_password):
             transaction.status = "request_sent"
             transaction.save()
+            audit_log("request_sent", target=transaction)
 
             messages.success(request,"Your Payment request have been sent successfully.")
             return redirect("core:amount-request-completed",account.account_number,transaction.transaction_id)
@@ -270,6 +273,7 @@ def Settlement_processing(request,account_number,transaction_id):
                     locked_txn.status = "request_settled"
                     locked_txn.save()
 
+                    audit_log("settlement_confirmed", target=locked_txn)  # in-atomic: rolls back with the money
             if mismatch:
                 messages.warning(request, "This transaction does not match the account in the link.")
                 return redirect("core:transactions")
