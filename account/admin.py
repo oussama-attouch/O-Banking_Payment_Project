@@ -1,5 +1,5 @@
 from django.contrib import admin
-from account.models import Account, Category, KYC, Recipient, Notification, SupportReply, SupportTicket
+from account.models import Account, Category, KYC, Recipient, Notification, SavingsGoal, SupportReply, SupportTicket
 from userauths.models import User
 from import_export.admin import ImportExportModelAdmin
 
@@ -135,3 +135,20 @@ class CategoryAdmin(ImportExportModelAdmin):
 
 
 admin.site.register(Category, CategoryAdmin)
+
+
+# Savings goals (Phase F-1). Read-mostly bookkeeping: the user edits
+# current_amount from /account/goals/ (Phase F-2), staff can correct rows here.
+# autocomplete_fields = ["user"] needs search_fields on the referenced admin;
+# UserAdmin already defines ('username', 'first_name', 'last_name', 'email').
+class SavingsGoalAdmin(ImportExportModelAdmin):
+    list_display = ["user", "name", "target_amount",
+                    "current_amount", "deadline",
+                    "is_completed", "created_at"]
+    list_filter = ["is_completed", "deadline", "created_at"]
+    search_fields = ["user__username", "user__email", "name"]
+    readonly_fields = ["created_at", "updated_at"]
+    autocomplete_fields = ["user"]
+
+
+admin.site.register(SavingsGoal, SavingsGoalAdmin)

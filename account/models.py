@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models
+from decimal import Decimal
 import uuid
 from shortuuid.django_fields import ShortUUIDField
 from userauths.models import User  # Importing the User model from another module
@@ -419,3 +420,66 @@ class Category(models.Model):
 
     def __str__(self):
         return f"{self.user.username} / {self.name}"
+
+
+# Savings goals (Phase F-1). A manual tracking tool: the user records progress
+# by editing current_amount from /account/goals/ (Phase F-2). It deliberately
+# does NOT move money and does not touch the transfer flow -- automating a
+# contribution would mean a second money-movement path beside
+# TransferProcess, which would have to re-implement balance locking, the
+# URL/account mismatch guard, the self-transfer check and the rate limiter.
+# The money path has been frozen since Phase 1.8 and stays frozen.
+class SavingsGoal(models.Model):
+    """A user's savings target. Progress is tracked by the user
+    updating current_amount from /account/goals/. This model does
+    NOT move money — it is a tracking tool, deliberately separate
+    from the transfer flow."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="savings_goals",
+    )
+    name = models.CharField(max_length=120)
+    target_amount = models.DecimalField(
+        max_digits=12, decimal_places=2,
+    )
+    current_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0,
+    )
+    deadline = models.DateField(null=True, blank=True)
+    is_completed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "is_completed", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} / {self.name}"
+
+    @property
+    def progress_percent(self):
+        """Return 0-100 as an int. 0 when target_amount is 0."""
+        if not self.target_amount:
+            return 0
+        pct = (self.current_amount / self.target_amount) * 100
+        return min(int(pct), 100)
+
+    @property
+    def remaining(self):
+        """Decimal amount still required. 0 when already met or over."""
+        diff = self.target_amount - self.current_amount
+        return diff if diff > 0 else Decimal("0.00")
+
+    @property
+    def is_overdue(self):
+        """True when a deadline is set, has passed, and the goal is
+        not yet complete."""
+        if self.is_completed or not self.deadline:
+            return False
+        from django.utils import timezone
+        return self.deadline < timezone.localdate()

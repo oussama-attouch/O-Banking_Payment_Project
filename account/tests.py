@@ -30,6 +30,7 @@ from account.models import (
     KYC,
     Notification,
     Recipient,
+    SavingsGoal,
     SupportReply,
     SupportTicket,
 )
@@ -2450,3 +2451,104 @@ class SpendByCategoryTests(DashboardAnalyticsTestBase):
         self.assertEqual(set(spend), {"total", "slices"})
         self.assertEqual(spend["total"], Decimal("8.00"))
         self.assertEqual([s["name"] for s in spend["slices"]], ["Utilities"])
+
+
+# =====================================================================
+# Phase F-1  the SavingsGoal model
+# =====================================================================
+class SavingsGoalModelTests(TestCase):
+    """The model and its three derived properties: progress_percent,
+    remaining and is_overdue.
+
+    SavingsGoal is a manual tracking tool. It moves no money and is not
+    wired into the transfer flow, so these tests only exercise the model
+    layer -- nothing here touches TransferProcess or an Account balance.
+    """
+
+    def make_user(self, name="saver"):
+        return User.objects.create_user(
+            username=name, email="%s@test.invalid" % name, password=PASSWORD
+        )
+
+    def make_goal(self, user=None, **kwargs):
+        user = user or self.make_user()
+        defaults = {"name": "New laptop", "target_amount": Decimal("1000.00")}
+        defaults.update(kwargs)
+        return SavingsGoal.objects.create(user=user, **defaults)
+
+    def test_goal_can_be_created(self):
+        user = self.make_user("creator")
+        goal = self.make_goal(user=user)
+
+        stored = SavingsGoal.objects.get(pk=goal.pk)
+        self.assertEqual(stored.user, user)
+        self.assertEqual(stored.current_amount, Decimal("0.00"))
+        self.assertFalse(stored.is_completed)
+
+    def test_goal_str(self):
+        user = self.make_user("strcheck")
+        goal = self.make_goal(user=user, name="Holiday fund")
+
+        text = str(goal)
+        self.assertIn(user.username, text)
+        self.assertIn("Holiday fund", text)
+        self.assertEqual(text, "%s / %s" % (user.username, "Holiday fund"))
+
+    def test_progress_percent_zero_when_empty(self):
+        goal = self.make_goal(current_amount=Decimal("0.00"))
+        self.assertEqual(goal.progress_percent, 0)
+
+    def test_progress_percent_partial(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("250.00")
+        )
+        self.assertEqual(goal.progress_percent, 25)
+
+    def test_progress_percent_capped_at_100(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("1500.00")
+        )
+        self.assertEqual(goal.progress_percent, 100)
+
+    def test_progress_percent_zero_when_target_zero(self):
+        # A zero target must not raise ZeroDivisionError.
+        goal = self.make_goal(
+            target_amount=Decimal("0.00"), current_amount=Decimal("50.00")
+        )
+        self.assertEqual(goal.progress_percent, 0)
+
+    def test_remaining_math(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("250.00")
+        )
+        self.assertEqual(goal.remaining, Decimal("750.00"))
+
+    def test_remaining_zero_when_met(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("1000.00")
+        )
+        self.assertEqual(goal.remaining, Decimal("0.00"))
+
+    def test_remaining_zero_when_over(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("1200.00")
+        )
+        self.assertEqual(goal.remaining, Decimal("0.00"))
+
+    def test_is_overdue_true(self):
+        goal = self.make_goal(
+            deadline=timezone.localdate() - timedelta(days=1),
+            is_completed=False,
+        )
+        self.assertTrue(goal.is_overdue)
+
+    def test_is_overdue_false_when_completed(self):
+        goal = self.make_goal(
+            deadline=timezone.localdate() - timedelta(days=1),
+            is_completed=True,
+        )
+        self.assertFalse(goal.is_overdue)
+
+    def test_is_overdue_false_when_no_deadline(self):
+        goal = self.make_goal(deadline=None)
+        self.assertFalse(goal.is_overdue)
