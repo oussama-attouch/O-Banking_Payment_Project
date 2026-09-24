@@ -66,6 +66,16 @@ class Transaction(models.Model):
     transaction_type = models.CharField(
         choices=TRANSACTION_TYPE, max_length=100, default="none")
 
+    # Optional budget category (Phase E-1). String reference on purpose: importing
+    # account.models here would close the account <-> core import cycle.
+    category = models.ForeignKey(
+        "account.Category",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="transactions",
+    )
+
     # DateTimeField for the transaction date, auto-generated on creation
     date = models.DateTimeField(auto_now_add=True)
 

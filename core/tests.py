@@ -17,7 +17,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import get_resolver, reverse
 from django.utils import timezone
 
-from account.models import Account, KYC
+from account.models import Account, Category, KYC
 from audit.models import LogEntry
 from core.models import Transaction
 from userauths.models import User
@@ -1056,3 +1056,64 @@ class RateLimitTests(MoneyMovementTestBase):
         self.assertEqual(entry.metadata.get("label"), "transfer")
         self.assertEqual(entry.metadata.get("window_seconds"), 3600)
         self.assertEqual(entry.actor, self.alice)
+
+
+# =====================================================================
+# Phase E-1  Transaction.category
+# =====================================================================
+class TransactionCategoryTests(MoneyMovementTestBase):
+    """The new FK is optional, settable, and SET_NULL on category delete.
+
+    Category is *not* part of the money path: the E-1 rule was one nullable
+    column, so nothing here changes how a transfer is written.
+    """
+
+    def category(self, name="Groceries"):
+        # The post_save receiver already gave alice the six defaults.
+        return Category.objects.get(user=self.alice, slug=name.lower())
+
+    def test_transaction_category_is_optional(self):
+        txn = self.create_transfer()
+        self.assertIsNone(txn.category)
+        self.assertIsNone(txn.category_id)
+        txn.refresh_from_db()
+        self.assertIsNone(txn.category_id)
+
+    def test_transaction_category_can_be_set(self):
+        category = self.category()
+        txn = self.create_transfer()
+        txn.category = category
+        txn.save()
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.category_id, category.pk)
+        self.assertEqual(txn.category, category)
+        # Same row from the other direction.
+        self.assertIn(txn, category.transactions.all())
+
+    def test_category_delete_sets_transaction_category_to_null(self):
+        category = self.category("Housing")
+        txn = self.create_transfer()
+        txn.category = category
+        txn.save()
+
+        category.delete()
+        txn.refresh_from_db()
+        self.assertIsNone(txn.category_id)
+        self.assertTrue(Transaction.objects.filter(pk=txn.pk).exists())
+
+    def test_transaction_category_nullable_with_existing_rows(self):
+        """Rows written before categories existed read back as NULL.
+
+        The schema migration added the column with no default and the data
+        migration only creates categories -- it never touches transactions -- so
+        a row created without one stays uncategorised.
+        """
+        txn = self.create_transfer()
+        stored = Transaction.objects.filter(pk=txn.pk).values_list(
+            "category_id", flat=True
+        ).get()
+        self.assertIsNone(stored)
+        self.assertIsNone(
+            Transaction.objects.filter(pk=txn.pk).values("category").get()["category"]
+        )

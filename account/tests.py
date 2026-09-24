@@ -26,6 +26,7 @@ from PIL import Image
 from account import analytics
 from account.models import (
     Account,
+    Category,
     KYC,
     Notification,
     Recipient,
@@ -2170,3 +2171,65 @@ class SearchTests(DashboardAnalyticsTestBase):
         narrowed = self.history(q="rent", type="request")
         self.assertEqual(narrowed["items"], [])
         self.assertEqual(narrowed["total"], 0)
+
+
+# =====================================================================
+# Phase E-1  budget categories
+# =====================================================================
+class CategoryTests(TestCase):
+    """The six defaults, and the (user, slug) rule that keeps them unique."""
+
+    DEFAULT_SLUGS = {
+        "groceries", "housing", "transport", "entertainment", "utilities", "other",
+    }
+
+    def make_user(self, name):
+        return User.objects.create_user(
+            username=name, email="%s@test.invalid" % name, password=PASSWORD
+        )
+
+    def test_new_user_gets_six_default_categories(self):
+        user = self.make_user("fresh")
+        cats = Category.objects.filter(user=user)
+        self.assertEqual(cats.count(), 6)
+        self.assertEqual(set(cats.values_list("slug", flat=True)), self.DEFAULT_SLUGS)
+
+    def test_unique_constraint_per_user(self):
+        user = self.make_user("dupe")
+        with self.assertRaises(IntegrityError):
+            # atomic() so the failed INSERT does not poison the test transaction.
+            with transaction.atomic():
+                Category.objects.create(user=user, name="Groceries II", slug="groceries")
+
+    def test_different_users_can_have_same_slug(self):
+        alice = self.make_user("alice")
+        bob = self.make_user("bob")
+        self.assertTrue(Category.objects.filter(user=alice, slug="groceries").exists())
+        self.assertTrue(Category.objects.filter(user=bob, slug="groceries").exists())
+
+    def test_category_str(self):
+        user = self.make_user("named")
+        category = Category.objects.get(user=user, slug="utilities")
+        self.assertTrue(str(category).startswith(user.username))
+        self.assertIn(category.name, str(category))
+        self.assertEqual(str(category), "%s / %s" % (user.username, category.name))
+
+    def test_category_cascade_on_user_delete(self):
+        user = self.make_user("gone")
+        user_id = user.pk
+        self.assertEqual(Category.objects.filter(user_id=user_id).count(), 6)
+
+        user.delete()
+        self.assertEqual(Category.objects.filter(user_id=user_id).count(), 0)
+
+    def test_category_ordering_by_name(self):
+        user = self.make_user("ordered")
+        # The six defaults would sort alongside these, so remove them first.
+        Category.objects.filter(user=user).delete()
+        for index, name in enumerate(["Charlie", "Alpha", "Bravo"]):
+            Category.objects.create(user=user, name=name, slug="custom-%d" % index)
+
+        self.assertEqual(
+            [c.name for c in Category.objects.filter(user=user)],
+            ["Alpha", "Bravo", "Charlie"],
+        )

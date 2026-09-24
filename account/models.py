@@ -166,6 +166,17 @@ class KYC(models.Model):
 def create_account(sender, instance, created, **kwargs):
     if created:
         Account.objects.create(user=instance)
+        Category.objects.bulk_create([
+            Category(user=instance, name=n, slug=s, icon=i, color=c)
+            for n, s, i, c in [
+                ("Groceries",     "groceries",     "cart",   "blue"),
+                ("Housing",       "housing",       "home",   "purple"),
+                ("Transport",     "transport",     "car",    "green"),
+                ("Entertainment", "entertainment", "ticket", "orange"),
+                ("Utilities",     "utilities",     "bolt",   "red"),
+                ("Other",         "other",         "dots",   "gray"),
+            ]
+        ])
 
 
 # Define the Recipient model: a saved-payee list, one row per (owner, target
@@ -362,3 +373,49 @@ class SupportReply(models.Model):
     @property
     def from_staff(self):
         return bool(self.author.is_staff)
+
+
+class Category(models.Model):
+    """A user-defined budget category. Six defaults are created
+    for every user at account creation time; users may add or
+    remove categories from /account/categories/ (Phase E-2)."""
+
+    ICON_CHOICES = [
+        ("cart", "Groceries"),
+        ("home", "Housing"),
+        ("car", "Transport"),
+        ("ticket", "Entertainment"),
+        ("bolt", "Utilities"),
+        ("dots", "Other"),
+    ]
+    COLOR_CHOICES = [
+        ("blue", "Blue"),
+        ("green", "Green"),
+        ("orange", "Orange"),
+        ("purple", "Purple"),
+        ("red", "Red"),
+        ("gray", "Gray"),
+    ]
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="categories",
+    )
+    name = models.CharField(max_length=50)
+    slug = models.SlugField(max_length=50)
+    icon = models.CharField(max_length=20, choices=ICON_CHOICES, default="dots")
+    color = models.CharField(max_length=20, choices=COLOR_CHOICES, default="gray")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "slug"],
+                name="unique_category_per_user",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} / {self.name}"

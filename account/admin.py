@@ -1,5 +1,5 @@
 from django.contrib import admin
-from account.models import Account, KYC, Recipient, Notification, SupportReply, SupportTicket
+from account.models import Account, Category, KYC, Recipient, Notification, SupportReply, SupportTicket
 from userauths.models import User
 from import_export.admin import ImportExportModelAdmin
 
@@ -121,3 +121,17 @@ class SupportReplyAdmin(ImportExportModelAdmin):
 # Register the SupportReply model standalone too, so a reply can be edited
 # directly without going through its ticket's change form.
 admin.site.register(SupportReply, SupportReplyAdmin)
+
+
+# Budget categories (Phase E-1). autocomplete_fields = ["user"] needs
+# search_fields on the referenced admin; UserAdmin already defines
+# ('username', 'first_name', 'last_name', 'email').
+class CategoryAdmin(ImportExportModelAdmin):
+    list_display = ["user", "name", "slug", "icon", "color", "created_at"]
+    list_filter = ["icon", "color", "created_at"]
+    search_fields = ["user__username", "user__email", "name", "slug"]
+    readonly_fields = ["created_at"]
+    autocomplete_fields = ["user"]
+
+
+admin.site.register(Category, CategoryAdmin)
