@@ -12,11 +12,13 @@ are testing.
 """
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import get_resolver, reverse
 from django.utils import timezone
 
 from account.models import Account, KYC
+from audit.models import LogEntry
 from core.models import Transaction
 from userauths.models import User
 
@@ -913,3 +915,144 @@ class SettlementMessageTests(MoneyMovementTestBase):
         # And the completion page still renders with the username fallback.
         done = payer.get(resp["Location"])
         self.assertEqual(done.status_code, 200)
+
+
+# =====================================================================
+# Phase B  rate limiting on the four credential-checking endpoints
+# =====================================================================
+class RateLimitTests(MoneyMovementTestBase):
+    """Brute force is refused with 429 and recorded, and only where it should be.
+
+    ``cache`` is the process-wide LocMemCache, and Django does *not* clear it
+    between tests, so counters would otherwise leak from one test -- or one test
+    class -- into the next. Two consequences, both load-bearing:
+
+    * ``setUp`` clears it, so each test starts from a zeroed window.
+    * ``tearDown`` clears it again. Without that, a test that exhausts
+      ``transfer:1`` (alice's pk) leaves an 11-attempt counter behind, and the
+      *later* money tests -- TransferFlowTests and friends, which POST to the
+      same view as a user with pk 1 -- would answer 429 instead of moving money.
+    """
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
+    # ------------------------------------------------------------- helpers
+    def login(self, client, email, password):
+        return client.post(reverse("userauths:sign-in"),
+                           {"email": email, "password": password})
+
+    def bob_client(self):
+        client = Client()
+        client.force_login(self.bob)
+        return client
+
+    # ------------------------------------------------------------- login
+    def test_login_allows_five_attempts(self):
+        for attempt in range(1, 6):
+            with self.subTest(attempt=attempt):
+                resp = self.login(Client(), self.alice.email, "wrong-password")
+                self.assertIn(resp.status_code, (200, 302),
+                              "attempt %d returned %s" % (attempt, resp.status_code))
+                self.assertNotEqual(resp.status_code, 429)
+
+    def test_login_sixth_attempt_is_429(self):
+        for _ in range(5):
+            self.login(Client(), self.alice.email, "wrong-password")
+        resp = self.login(Client(), self.alice.email, "wrong-password")
+        self.assertEqual(resp.status_code, 429)
+        self.assertContains(resp, "Too many requests", status_code=429)
+
+    def test_login_limit_is_per_email(self):
+        for _ in range(5):
+            self.login(Client(), self.alice.email, "wrong-password")
+
+        resp = self.login(Client(), self.bob.email, "wrong-password")
+        self.assertNotEqual(resp.status_code, 429,
+                            "bob's first attempt was refused by alice's counter")
+
+    def test_login_success_resets_counter(self):
+        for _ in range(3):
+            self.login(Client(), self.alice.email, "wrong-password")
+
+        ok = self.login(Client(), self.alice.email, PASSWORD)
+        self.assertEqual(ok.status_code, 302)
+        self.assertIn("/account/", ok["Location"])
+
+        for attempt in range(1, 5):
+            with self.subTest(after_reset=attempt):
+                resp = self.login(Client(), self.alice.email, "wrong-password")
+                self.assertNotEqual(resp.status_code, 429,
+                                    "counter survived a successful login")
+
+    def test_login_get_does_not_consume_quota(self):
+        client = Client()
+        for _ in range(10):
+            self.assertEqual(client.get(reverse("userauths:sign-in")).status_code, 200)
+
+        resp = self.login(client, self.alice.email, "wrong-password")
+        self.assertNotEqual(resp.status_code, 429,
+                            "GET requests consumed the quota")
+
+    # ------------------------------------------------------------- money paths
+    def test_transfer_rate_limit_triggers(self):
+        txn = self.create_transfer()
+        url = self.transfer_process_url(txn)
+
+        for attempt in range(1, 11):
+            with self.subTest(attempt=attempt):
+                resp = self.client.post(url, {"password": "wrong-password"})
+                self.assertNotEqual(resp.status_code, 429,
+                                    "attempt %d was refused too early" % attempt)
+
+        resp = self.client.post(url, {"password": "wrong-password"})
+        self.assertEqual(resp.status_code, 429)
+        self.assertContains(resp, "Too many requests", status_code=429)
+
+        # Refused before the view ran, so no money moved and the txn is untouched.
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "processing")
+        self.assertEqual(self.balances(), (Decimal("1000.00"), Decimal("500.00")))
+
+    def test_rate_limit_writes_audit_entry(self):
+        for _ in range(5):
+            self.login(Client(), self.alice.email, "wrong-password")
+        resp = self.login(Client(), self.alice.email, "wrong-password")
+        self.assertEqual(resp.status_code, 429)
+
+        entries = LogEntry.objects.filter(action="rate_limited")
+        self.assertEqual(entries.count(), 1, "expected exactly one audit entry")
+        entry = entries.get()
+        self.assertEqual(entry.metadata.get("key"), "login:%s" % self.alice.email)
+        self.assertEqual(entry.metadata.get("limit"), 5)
+        self.assertEqual(entry.metadata.get("window_seconds"), 15 * 60)
+        self.assertEqual(entry.metadata.get("label"), "login")
+        self.assertEqual(entry.metadata.get("count"), 6)
+        # The login page is reached anonymously, so there is no actor.
+        self.assertIsNone(entry.actor)
+
+    def test_rate_limit_key_depends_on_user_for_transfer(self):
+        txn = self.create_transfer()
+        url = self.transfer_process_url(txn)
+
+        for _ in range(10):
+            self.client.post(url, {"password": "wrong-password"})
+        self.assertEqual(
+            self.client.post(url, {"password": "wrong-password"}).status_code, 429
+        )
+
+        resp = self.bob_client().post(url, {"password": "wrong-password"})
+        self.assertNotEqual(resp.status_code, 429,
+                            "bob inherited alice's transfer counter")
+
+        # The money path names its actor: the refusal is attributable.
+        entry = LogEntry.objects.filter(action="rate_limited").get()
+        self.assertEqual(entry.metadata.get("key"), "transfer:%s" % self.alice.pk)
+        self.assertEqual(entry.metadata.get("label"), "transfer")
+        self.assertEqual(entry.metadata.get("window_seconds"), 3600)
+        self.assertEqual(entry.actor, self.alice)

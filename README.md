@@ -2,7 +2,7 @@
 
 A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively-licensed UI.
 
-`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `186 tests passing`
+`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `194 tests passing`
 
 ## Table of contents
 
@@ -39,7 +39,7 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 ## Solution Overview
 
-**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 186 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
+**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 194 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
 **Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports: Django, django-jazzmin, django-import-export, shortuuid, and Pillow.
 
@@ -103,6 +103,7 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 - Saved recipients for one-click transfers
 - Notification center: a bell in the topbar with an unread badge, a 5-item dropdown, and a paginated list
 - Immutable audit log: append-only `LogEntry` for sensitive actions, with a read-only admin
+- Rate limiting on login, transfer, settlement, and payment-request confirmation
 - Support tickets: inline create, thread view, and staff replies from the admin
 - User settings: profile editing and password change
 - Public blog (list, detail, category filter) and a contact form
@@ -167,9 +168,13 @@ One notification is created per state transition, by comparing the status captur
 
 The write path is a single helper, `audit.utils.log()`, which never raises: a logging failure cannot take down the request that triggered it. `AuditContextMiddleware` stores the current request in a thread-local so the helper can resolve the actor, IP, and user-agent from any view without threading the request through every call site.
 
+### k) Rate limiting is a fixed window, not a lockout
+
+Login is limited to 5 attempts per email per 15 minutes; transfer, settlement, and payment-request confirmation to 10 attempts per user per hour. The window is fixed at the first attempt (`cache.add` sets the timeout; `cache.incr` never resets it), so a burst of failures does not extend the lockout indefinitely. Only POSTs consume the quota, and a successful login clears the counter for that email. The limiter uses Django's default LocMemCache and is therefore per-process — correct for a single-worker dev server, listed in Future Work as needing a shared cache in production.
+
 ## Results
 
-- 186 tests, from 0 (three stubs, four lines)
+- 194 tests, from 0 (three stubs, four lines)
 - `static/` 13.99 MB → 2.38 MB (−83%, 206 files → 11)
 - 7 critical bugs from the original audit closed
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect
@@ -258,6 +263,7 @@ The audit and modernization ran as a numbered phase sequence — from the securi
 - An admin workflow for confirming KYC (`kyc_confirmed` is written only through the admin list view)
 - Replace the seeder's per-row date update with a bulk raw SQL update for 10× scale
 - Replace `"test" in sys.argv` with a dedicated settings module for stricter test-runner detection
+- A shared cache backend (Redis) for the rate limiter so the quota is enforced across multiple worker processes
 
 ## Author
 

@@ -9,6 +9,7 @@ from decimal import Decimal  # Import the Decimal class for precise decimal arit
 from core.security import AmountError, find_party_transaction, parse_amount
 from django.views.decorators.http import require_POST
 from audit.utils import log as audit_log
+from core.ratelimit import rate_limit, user_key
 
 # Require authentication for this view using the @login_required decorator
 @login_required
@@ -113,6 +114,7 @@ def AmountRequestConfirmation(request,account_number,transaction_id):
     return render(request,"payment_request/amount-request-confirmation.html",context)
 
 
+@rate_limit(user_key("amount_request"), limit=10, window=3600, label="amount_request")
 @login_required
 def AmountRequestFinalProcess(request, account_number,transaction_id):
     # Scoped to the requesting user's own transactions (see core.security).
@@ -188,6 +190,7 @@ def Settlement_confirmation(request,account_number,transaction_id):
         }
     return render(request,"payment_request/settlement-confirmation.html",context)
 
+@rate_limit(user_key("settlement"), limit=10, window=3600, label="settlement")
 @login_required
 def Settlement_processing(request,account_number,transaction_id):
     # Scoped to the requesting user's own transactions (see core.security).

@@ -5,6 +5,7 @@ from django.contrib import messages
 from userauths.models import User
 from userauths.forms import UserRegisterForm
 from audit.utils import log as audit_log
+from core.ratelimit import rate_limit, login_key, reset_login_limit
 
 def RegisterView(request):
     if request.method == "POST":
@@ -35,6 +36,7 @@ def RegisterView(request):
     return render(request, "userauths/sign-up.html", context)
 
 
+@rate_limit(login_key, limit=5, window=15 * 60, label="login")
 def LoginView(request):
     if request.method == "POST":
         email = request.POST.get("email")
@@ -47,6 +49,7 @@ def LoginView(request):
             if user is not None: # if there is a user
                 login(request, user)
                 audit_log("user_login", target=user)
+                reset_login_limit(request.POST.get("email"))
                 messages.success(request, "You are logged.")
                 return redirect("account:account")
             else:

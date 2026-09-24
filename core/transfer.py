@@ -7,6 +7,7 @@ from django.contrib import messages
 from core.models import Transaction
 from core.security import AmountError, find_party_transaction, parse_amount
 from audit.utils import log as audit_log
+from core.ratelimit import rate_limit, user_key
 
 # Apply the login_required decorator to the function
 @login_required
@@ -146,6 +147,7 @@ def TransferConfirmation(request, account_number, transaction_id):
     return render(request, "transfer/transfer-confirmation.html", context)
 
 
+@rate_limit(user_key("transfer"), limit=10, window=3600, label="transfer")
 @login_required
 def TransferProcess(request, account_number, transaction_id):
     account = Account.objects.filter(account_number=account_number).first()
