@@ -37,6 +37,7 @@ from core.models import Transaction
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from audit.utils import log as audit_log
+from userauths.models import TOTPDevice
 
 def _kyc_required(request):
     """Shared gate for the dashboard views.
@@ -344,6 +345,7 @@ def settings_view(request):
         "account": account,
         "kyc": kyc,
         "profile_form": profile_form,
+        "totp_device": TOTPDevice.objects.filter(user=request.user).first(),
     }
     return render(request, "account/settings.html", context)
 

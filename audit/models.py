@@ -86,6 +86,10 @@ class LogEntry(models.Model):
         ("support_ticket_created", "Support ticket created"),
         ("support_reply_created", "Support reply created"),
         ("rate_limited", "Rate limited"),
+        ("2fa_enabled", "Two-factor authentication enabled"),
+        ("2fa_disabled", "Two-factor authentication disabled"),
+        ("2fa_challenge_passed", "Two-factor challenge passed"),
+        ("2fa_challenge_failed", "Two-factor challenge failed"),
     ]
 
     actor = models.ForeignKey(

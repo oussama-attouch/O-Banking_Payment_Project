@@ -164,6 +164,41 @@
             </div>
         </div>
 
+        <div class="card mt-3">
+            <div class="card-header">
+                <h2 class="card-title">Two-factor authentication</h2>
+            </div>
+            <div class="card-body">
+                {% if totp_device and totp_device.is_confirmed %}
+                <p class="text-secondary">
+                    Two-factor authentication is <span class="text-success fw-medium">enabled</span>.
+                    You will be asked for a 6-digit code from your authenticator app
+                    each time you sign in.
+                </p>
+                <a href="{% url 'userauths:two_factor_disable' %}" class="btn btn-outline-danger">
+                    <i class="ti ti-shield-off me-1"></i> Disable 2FA
+                </a>
+                {% elif totp_device %}
+                <p class="text-secondary">
+                    You started setting up two-factor authentication but have not
+                    confirmed it yet.
+                </p>
+                <a href="{% url 'userauths:two_factor_setup' %}" class="btn btn-primary">
+                    <i class="ti ti-shield-check me-1"></i> Finish setup
+                </a>
+                {% else %}
+                <p class="text-secondary">
+                    Two-factor authentication adds a second check when you sign in.
+                    Use an authenticator app (Google Authenticator, 1Password,
+                    Authy) to generate a 6-digit code.
+                </p>
+                <a href="{% url 'userauths:two_factor_setup' %}" class="btn btn-primary">
+                    <i class="ti ti-shield-check me-1"></i> Enable 2FA
+                </a>
+                {% endif %}
+            </div>
+        </div>
+
     </div>
 
 </div>

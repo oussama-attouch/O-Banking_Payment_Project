@@ -1,0 +1,83 @@
+{% extends "partials/dashboard-base.html" %}
+{% block title %}{% if confirmed %}2FA enabled · O-Banking{% else %}Enable 2FA · O-Banking{% endif %}{% endblock %}
+{% block content %}
+{% if confirmed %}
+<div class="container-xl py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title text-success">
+            <i class="ti ti-shield-check me-1"></i> Two-factor authentication enabled
+          </h2>
+        </div>
+        <div class="card-body">
+          <p>Save these recovery codes somewhere safe. Each can be used
+             once if you lose access to your authenticator app. They will
+             not be shown again.</p>
+          <div class="bg-surface-secondary border rounded p-3 mb-3">
+            <div class="row row-cols-2 row-cols-md-5 g-2">
+              {% for c in recovery_codes %}
+                <div class="col"><code>{{ c }}</code></div>
+              {% endfor %}
+            </div>
+          </div>
+          <a href="{% url 'account:settings' %}" class="btn btn-primary">
+            Back to settings
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="container-xl py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Enable two-factor authentication</h2>
+        </div>
+        <div class="card-body">
+          <div class="row g-4">
+            <div class="col-md-6 text-center">
+              {# The one permitted inline style: the QR is a data: URL whose #}
+              {# intrinsic size varies with the URI it encodes, and Tabler has #}
+              {# no utility that caps an image's width. #}
+              <img src="{{ qr }}" alt="2FA QR code"
+                   class="img-fluid border rounded p-2 bg-white"
+                   style="max-width: 220px;">
+            </div>
+            <div class="col-md-6">
+              <p class="text-secondary small mb-2">
+                Scan the QR code with your authenticator app, or enter
+                this secret manually:
+              </p>
+              <code class="d-block mb-3">{{ device.secret }}</code>
+              <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                  <label class="form-label" for="code">6-digit code</label>
+                  <input type="text" name="code" id="code"
+                         inputmode="numeric" autocomplete="one-time-code"
+                         maxlength="6" class="form-control"
+                         placeholder="000000" autofocus>
+                  {% if error %}
+                    <div class="text-danger small mt-1">{{ error }}</div>
+                  {% endif %}
+                </div>
+                <button type="submit" class="btn btn-primary">
+                  Verify and enable
+                </button>
+                <a href="{% url 'account:settings' %}"
+                   class="btn btn-outline-secondary ms-2">Cancel</a>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
