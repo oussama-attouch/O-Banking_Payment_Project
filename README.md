@@ -2,7 +2,7 @@
 
 A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively-licensed UI.
 
-`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `172 tests passing`
+`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `186 tests passing`
 
 ## Table of contents
 
@@ -39,7 +39,7 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 ## Solution Overview
 
-**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 172 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
+**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 186 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
 **Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports: Django, django-jazzmin, django-import-export, shortuuid, and Pillow.
 
@@ -102,6 +102,7 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 - Statements with a range selector (this month, last 3 months, this year, last 12 months) and CSV export
 - Saved recipients for one-click transfers
 - Notification center: a bell in the topbar with an unread badge, a 5-item dropdown, and a paginated list
+- Immutable audit log: append-only `LogEntry` for sensitive actions, with a read-only admin
 - Support tickets: inline create, thread view, and staff replies from the admin
 - User settings: profile editing and password change
 - Public blog (list, detail, category filter) and a contact form
@@ -160,9 +161,15 @@ Every chart colour resolves through `getComputedStyle` against the `--tblr-*` cu
 
 One notification is created per state transition, by comparing the status captured in `pre_save` against the value written in `post_save`. The signal reads transactions; it never changes how they are written, so the money path is untouched.
 
+### j) The audit log is append-only, not editable
+
+`audit.LogEntry` refuses every mutation path: `save()` on an existing row, `delete()`, `queryset.update()`, `queryset.delete()`, `bulk_create()`, `get_or_create()`, and `update_or_create()` all raise `PermissionError`. The admin is read-only. `actor` uses `SET_NULL`, so deleting a user leaves their entries in place with a null actor — a user cannot erase their own audit trail by deleting their account.
+
+The write path is a single helper, `audit.utils.log()`, which never raises: a logging failure cannot take down the request that triggered it. `AuditContextMiddleware` stores the current request in a thread-local so the helper can resolve the actor, IP, and user-agent from any view without threading the request through every call site.
+
 ## Results
 
-- 172 tests, from 0 (three stubs, four lines)
+- 186 tests, from 0 (three stubs, four lines)
 - `static/` 13.99 MB → 2.38 MB (−83%, 206 files → 11)
 - 7 critical bugs from the original audit closed
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect

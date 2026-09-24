@@ -12,6 +12,7 @@ INSERTs -- what it drops is only the *request* context. The gate list confirms
 this ("ip ... None on a direct call with no request"), so the test asserts the
 implemented behaviour: no exception, one row, ``actor`` and ``ip`` both None.
 """
+import json
 from decimal import Decimal
 
 from django.contrib import admin
@@ -231,3 +232,46 @@ class AuditLogTests(TestCase):
         self.assertFalse(model_admin.has_add_permission(request))
         self.assertFalse(model_admin.has_change_permission(request))
         self.assertFalse(model_admin.has_delete_permission(request))
+
+    # ------------------------------------- 13-14  login failure, password change
+    def test_login_failed_is_logged(self):
+        """A wrong password leaves a trail, with no actor and no password.
+
+        The email has to belong to a real user: LoginView looks the address up
+        first, and its bare ``except`` swallows the miss, so an *unknown* email
+        never reaches ``authenticate()`` and therefore never fires the signal.
+        """
+        wrong = "definitely-not-the-password"
+        resp = Client().post(
+            reverse("userauths:sign-in"),
+            {"email": self.alice.email, "password": wrong},
+        )
+        self.assertEqual(resp.status_code, 302)
+
+        entry = self._entry("user_login_failed")
+        self.assertIsNone(entry.actor)
+        self.assertEqual(entry.metadata.get("submitted_identifier"), self.alice.email)
+        self.assertEqual(entry.ip, "127.0.0.1")
+        # Django cleanses the password value before sending the signal; the
+        # helper must not put it back.
+        self.assertNotIn(wrong, json.dumps(entry.metadata))
+        self.assertEqual(LogEntry.objects.filter(action="user_login").count(), 0)
+
+    def test_password_change_is_logged(self):
+        new_password = "pw-Phase-A2-new-pass"
+        resp = self.client.post(reverse("account:password_change"), {
+            "old_password": PASSWORD,
+            "new_password1": new_password,
+            "new_password2": new_password,
+        })
+        self.assertEqual(resp.status_code, 302)
+
+        entry = self._entry("password_changed")
+        self.assertEqual(entry.actor, self.alice)
+        self.assertEqual(entry.target_type, "User")
+        self.assertEqual(entry.target_id, str(self.alice.pk))
+        # Nothing about the credential is recorded.
+        self.assertEqual(entry.metadata, {})
+
+        self.alice.refresh_from_db()
+        self.assertTrue(self.alice.check_password(new_password))

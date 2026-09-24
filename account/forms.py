@@ -65,6 +65,16 @@ class StyledPasswordChangeForm(PasswordChangeForm):
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
 
+    def save(self, commit=True):
+        user = super().save(commit=commit)
+        # The thread-local request is set by AuditContextMiddleware,
+        # so audit.log() can resolve the actor without threading the
+        # request through. Importing here avoids a module-level
+        # dependency from account into audit for a single method.
+        from audit.utils import log
+        log("password_changed", target=user)
+        return user
+
 
 class RecipientForm(forms.Form):
     """Save a payee by account number.
