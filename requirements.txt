@@ -6,6 +6,8 @@
 #   django-import-export - ImportExportModelAdmin in account/admin.py
 #   shortuuid            - ShortUUIDField for account and transaction identifiers
 #   Pillow               - ImageField support for the KYC uploads
+#   pyotp                - TOTP verification for two-factor authentication
+#   qrcode[pil]          - PNG QR code for the 2FA enrolment screen
 #
 # Pinned to the versions this project is verified against. The previous list
 # carried roughly 43 packages that no code referenced: the whole DRF / djoser /
