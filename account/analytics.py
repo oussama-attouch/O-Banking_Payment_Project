@@ -428,6 +428,81 @@ def get_top_counterparties(user, limit=5, transaction_type=None):
     ]
 
 
+def get_active_counterparties(user, days=None, transaction_type=None):
+    """Return the number of distinct other accounts the user
+    transacted with in the current window, plus the count in the
+    immediately previous window of the same length.
+
+    A counterparty is another User the user sent money to OR
+    received money from. The user's own account is excluded.
+    Failed transactions are not counted (no money moved).
+
+    When days is None, the previous window is None and delta_pct
+    is None -- there is no "previous" for "all time".
+
+    Returns:
+      {
+        "current": int,
+        "previous": int | None,
+        "delta_pct": float | None,
+      }
+
+    Query count: **4** for a window (two per window: the distinct
+    receivers the user sent to, then the distinct senders they received
+    from), **2** for "all time".
+    """
+    now = timezone.now()
+    base = (
+        Transaction.objects.filter(_party_q(user))
+        .exclude(status="failed")
+    )
+
+    if transaction_type:
+        base = base.filter(transaction_type=transaction_type)
+
+    def _unique_count(qs):
+        # Two queries: distinct senders the user received from,
+        # distinct recievers the user sent to. Union in Python.
+        sent_to = set(
+            qs.filter(sender=user)
+              .values_list("reciever_id", flat=True)
+              .distinct()
+        )
+        received_from = set(
+            qs.filter(reciever=user)
+              .values_list("sender_id", flat=True)
+              .distinct()
+        )
+        combined = (sent_to | received_from) - {None, user.pk}
+        return len(combined)
+
+    if days is None:
+        current = _unique_count(base)
+        return {"current": current, "previous": None, "delta_pct": None}
+
+    current_start = now - timedelta(days=days)
+    previous_start = now - timedelta(days=days * 2)
+
+    current_qs = base.filter(date__gte=current_start)
+    previous_qs = base.filter(
+        date__gte=previous_start, date__lt=current_start
+    )
+
+    current = _unique_count(current_qs)
+    previous = _unique_count(previous_qs)
+
+    if previous == 0:
+        delta_pct = None
+    else:
+        delta_pct = round(((current - previous) / previous) * 100, 1)
+
+    return {
+        "current": current,
+        "previous": previous,
+        "delta_pct": delta_pct,
+    }
+
+
 def get_kyc_status(user, account=None, has_kyc=None):
     """Where the user stands in the KYC flow.
 

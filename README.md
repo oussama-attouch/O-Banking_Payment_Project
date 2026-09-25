@@ -2,7 +2,7 @@
 
 A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively-licensed UI.
 
-`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `294 tests passing`
+`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `298 tests passing`
 
 ## Table of contents
 
@@ -39,7 +39,7 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 ## Solution Overview
 
-**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 294 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
+**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 298 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
 **Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports, then extended with two more when two-factor authentication was added: Django, django-jazzmin, django-import-export, shortuuid, Pillow, pyotp, and qrcode.
 
@@ -130,6 +130,7 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 - Payment requests and settlements, with a separate settlement direction rule
 - Dashboard: 8 KPIs, 5 charts, 2 summary tables, and a filterable paginated history
 - Period and type filter bar that recomputes every KPI and every chart from one row of links
+- A "Counterparties (period)" KPI showing how many distinct accounts the user banked with in the selected window
 - KPI sparklines, delta chips, and dark mode
 - Statements with a range selector (this month, last 3 months, this year, last 12 months) and CSV export
 - Full-text search across description, transaction id, and counterparty
@@ -234,7 +235,7 @@ It counts only settled money (`completed`, `request_settled`). The row being con
 
 ## Results
 
-- 294 tests, from 0 (three stubs, four lines)
+- 298 tests, from 0 (three stubs, four lines)
 - `static/` 13.99 MB → 2.38 MB (−83%, 206 files → 11)
 - 7 critical bugs from the original audit closed
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect

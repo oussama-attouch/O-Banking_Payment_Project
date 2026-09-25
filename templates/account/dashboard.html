@@ -313,6 +313,29 @@
         </div>
     </div>
 
+    <div class="col-6 col-md-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div class="text-secondary small">Counterparties ({{ active_period_short }})</div>
+                    <i class="ti ti-users-group text-secondary"></i>
+                </div>
+                <div>
+                    <div class="h1 mb-0">{{ active_counterparties.current }}</div>
+{% if active_counterparties.delta_pct is not None %}
+                    <span class="kpi-delta {% if active_counterparties.delta_pct >= 0 %}positive{% else %}negative{% endif %}">
+                        {% if active_counterparties.delta_pct >= 0 %}<i class="ti ti-trending-up"></i>{% else %}<i class="ti ti-trending-down"></i>{% endif %}
+                        {{ active_counterparties.delta_pct }}%
+                    </span>
+{% else %}
+                    <span class="text-secondary small">no comparison</span>
+{% endif %}
+                </div>
+                <div class="text-secondary small mt-1">Accounts you banked with</div>
+            </div>
+        </div>
+    </div>
+
 </div>
 <!-- ============================== Row 3: charts ======================== -->
 <div id="charts-empty" class="card mt-3 d-none">

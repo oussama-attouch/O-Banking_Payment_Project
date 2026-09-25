@@ -19,6 +19,7 @@ from account.analytics import (
     PERIOD_DAYS,
     PERIOD_SHORT,
     TYPE_FILTER_CHOICES,
+    get_active_counterparties,
     get_spend_by_category,
 )
 from account.models import (
@@ -179,6 +180,12 @@ def dashboard(request):
         "history_type": history_type,
         "history_q": history_q,
         "spend_by_category": get_spend_by_category(
+            request.user, days=days, transaction_type=txn_type,
+        ),
+        # Phase G-3. The 8th KPI: how many distinct other accounts the user
+        # banked with in the selected window. A count, not a series, so it
+        # carries no sparkline -- only the current/previous delta.
+        "active_counterparties": get_active_counterparties(
             request.user, days=days, transaction_type=txn_type,
         ),
         "history_choices": analytics.STATUS_CHOICES,

@@ -2744,3 +2744,72 @@ class SavingsGoalViewTests(DashboardAnalyticsTestBase):
         self.assertEqual(resp.status_code, 200)
         self.assertNotContains(resp, "Savings goals")
         self.assertNotContains(resp, "Manage goals")
+
+
+class ActiveCounterpartiesTests(DashboardAnalyticsTestBase):
+    """Phase G-3: the 8th KPI -- distinct accounts banked with in the window.
+
+    ``alice`` is the user under test. Counterparties are the *other* party on a
+    transaction she sent or received, so her own pk must never be counted, and a
+    failed movement moved no money and therefore banks her with nobody.
+    """
+
+    def test_no_counterparties_for_fresh_user(self):
+        # dave is a stranger to alice and has no movements of his own.
+        result = analytics.get_active_counterparties(self.dave, days=30)
+
+        self.assertEqual(
+            set(result), {"current", "previous", "delta_pct"},
+            "the helper's shape is the template's contract",
+        )
+        self.assertEqual(result["current"], 0)
+        self.assertEqual(result["previous"], 0)
+        self.assertIsNone(
+            result["delta_pct"],
+            "0 -> 0 has no meaningful percentage change",
+        )
+
+    def test_counts_unique_counterparties(self):
+        # Three distinct counterparties, and a second movement with bob that
+        # must collapse into his one slot in the set.
+        self.make_txn(self.alice, self.bob, "10.00")
+        self.make_txn(self.bob, self.alice, "5.00")
+        self.make_txn(self.alice, self.carol, "10.00")
+        self.make_txn(self.dave, self.alice, "10.00")
+
+        result = analytics.get_active_counterparties(self.alice, days=30)
+
+        self.assertEqual(result["current"], 3)
+        self.assertEqual(result["previous"], 0)
+        self.assertIsNone(result["delta_pct"])
+
+    def test_excludes_failed_transactions(self):
+        self.make_txn(self.alice, self.bob, "10.00", status="completed")
+        self.make_txn(self.alice, self.carol, "10.00", status="failed")
+
+        result = analytics.get_active_counterparties(self.alice, days=30)
+
+        self.assertEqual(
+            result["current"], 1,
+            "a failed transfer moved no money, so carol is not a counterparty",
+        )
+
+    def test_delta_computed_between_windows(self):
+        # Current window (last 30 days) holds bob; the 30 days before it hold
+        # carol. One each, so the period-over-period change is exactly zero.
+        self.make_txn(self.alice, self.bob, "10.00",
+                      when=timezone.now() - timedelta(days=5))
+        self.make_txn(self.alice, self.carol, "10.00",
+                      when=timezone.now() - timedelta(days=40))
+
+        result = analytics.get_active_counterparties(self.alice, days=30)
+
+        self.assertEqual(result["current"], 1)
+        self.assertEqual(result["previous"], 1)
+        self.assertEqual(result["delta_pct"], 0.0)
+
+        # "All time" has no window before it: current only, no comparison.
+        all_time = analytics.get_active_counterparties(self.alice)
+        self.assertEqual(all_time["current"], 2)
+        self.assertIsNone(all_time["previous"])
+        self.assertIsNone(all_time["delta_pct"])
