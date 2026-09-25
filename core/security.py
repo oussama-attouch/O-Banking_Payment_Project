@@ -6,12 +6,13 @@ boundary rather than in the model layer. ``Transaction.amount`` stays a plain
 
 Phase G-1 adds the per-user transfer-limit helpers at the foot of this module:
 ``_period_start`` (calendar window boundaries), ``_outgoing_q`` (the direction
-rule for money leaving the user's account), ``_used_in_period`` (the sum inside
-one window, failed rows excluded), ``ensure_transfer_limits`` (idempotent lazy
-creation of the three ``TransferLimit`` rows) and ``check_transfer_limit``
-(``(ok, details)`` for a proposed amount, naming the first period it breaks).
-Nothing here enforces anything yet; Phase G-2 calls the checker from inside the
-transfer and settlement atomic blocks.
+rule for money leaving the user's account), ``_used_in_period`` (the settled
+sum inside one window), ``ensure_transfer_limits`` (idempotent lazy creation of
+the three ``TransferLimit`` rows) and ``check_transfer_limit`` (``(ok,
+details)`` for a proposed amount, naming the first period it breaks). Phase G-2
+calls the checker from inside the transfer and settlement atomic blocks, which
+is what pinned ``_used_in_period`` to settled rows only: the row being
+confirmed is still in flight at that moment.
 """
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -112,6 +113,13 @@ def find_party_transaction(user, transaction_id):
 # =====================================================================
 # Phase G-1  per-user transfer limits
 # =====================================================================
+#: Statuses in which an outgoing movement has actually left the account: a
+#: completed transfer, or a request its payer has settled. These are the only
+#: rows the transfer limit counts (the rule Phase G-1 shipped, tightened in
+#: G-2 when the checker moved inside the money path); see _used_in_period.
+SETTLED_STATUSES = ("completed", "request_settled")
+
+
 def _period_start(period, now=None):
     """Return the datetime at which the current period begins.
 
@@ -153,15 +161,20 @@ def _outgoing_q(user):
 def _used_in_period(user, period, now=None):
     """Sum of the user's outgoing transfers in the current period.
 
-    Returns a ``Decimal``. Rows in the ``failed`` status are excluded: nothing
-    was debited, so nothing counts against the limit.
+    Returns a ``Decimal``. Only money that has actually moved counts: rows in
+    :data:`SETTLED_STATUSES`. A ``failed`` row was never debited, a
+    ``processing`` transfer has not been confirmed yet, and an unsettled
+    request has not been paid -- none of them is money out. The row being
+    confirmed is itself still ``processing`` when the caller checks it from
+    inside the atomic block, so counting it would measure a transfer against
+    itself and halve every limit.
     """
     start = _period_start(period, now=now)
-    # Exclude failed -- nothing was debited for those.
     qs = Transaction.objects.filter(
         _outgoing_q(user),
         date__gte=start,
-    ).exclude(status="failed")
+        status__in=SETTLED_STATUSES,
+    )
     total = qs.aggregate(total=Sum("amount"))["total"]
     return total if total is not None else Decimal("0.00")
 

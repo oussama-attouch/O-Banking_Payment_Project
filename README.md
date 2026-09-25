@@ -2,7 +2,7 @@
 
 A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively-licensed UI.
 
-`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `276 tests passing`
+`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `294 tests passing`
 
 ## Table of contents
 
@@ -39,7 +39,7 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 ## Solution Overview
 
-**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 276 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
+**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 294 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
 **Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports: Django, django-jazzmin, django-import-export, shortuuid, and Pillow.
 
@@ -107,6 +107,7 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 - Notification center: a bell in the topbar with an unread badge, a 5-item dropdown, and a paginated list
 - Immutable audit log: append-only `LogEntry` for sensitive actions, with a read-only admin
 - Rate limiting on login, transfer, settlement, and payment-request confirmation
+- Per-user daily / weekly / monthly transfer limits, editable from the admin
 - Optional TOTP two-factor authentication with single-use recovery codes and a session-parked challenge step
 - Support tickets: inline create, thread view, and staff replies from the admin
 - User settings: profile editing and password change
@@ -192,9 +193,15 @@ The spend-by-category chart is computed from `Transaction` rows at render time, 
 
 The `SavingsGoal` model does not interact with the transfer flow. A "contribute" button that moved money would need a second money-movement path — with its own balance locking, self-transfer guard, URL/account mismatch check, and rate limiter — next to the one that has been frozen since Phase 1.8. Instead, the user records their own progress. This keeps the money path single.
 
+### p) The transfer limit is checked inside the atomic block
+
+The limit is enforced inside the same `transaction.atomic()` and `select_for_update()` block that guards the balance mutation. Checking outside would allow a race: two concurrent confirmations could each see an under-limit total and both proceed. The check adds five bounded queries to every confirmation, which extends the row-lock window slightly — acceptable at demo scale, cacheable at production scale.
+
+It counts only settled money (`completed`, `request_settled`). The row being confirmed is still `processing` at that moment, so counting in-flight rows would measure each transfer against itself — a 100.00 transfer against a 100.00 limit would be refused as 200.00.
+
 ## Results
 
-- 276 tests, from 0 (three stubs, four lines)
+- 294 tests, from 0 (three stubs, four lines)
 - `static/` 13.99 MB → 2.38 MB (−83%, 206 files → 11)
 - 7 critical bugs from the original audit closed
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect
