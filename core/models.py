@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from userauths.models import User
 from account.models import Account
@@ -88,3 +90,54 @@ class Transaction(models.Model):
             return f"{self.user}"
         except:
             return f"Transaction"
+
+
+# =====================================================================
+# Phase G-1  per-user transfer limits
+# =====================================================================
+class TransferLimit(models.Model):
+    """Per-user transfer limit for one period ("day", "week",
+    "month"). Exactly three rows are expected per user, created
+    lazily by core.security.check_transfer_limit(). A staff user
+    edits the amount from the admin. The limit is a cap on the
+    SUM of the user's outgoing transfers inside the period,
+    not on a single transfer."""
+
+    PERIOD_DAY = "day"
+    PERIOD_WEEK = "week"
+    PERIOD_MONTH = "month"
+    PERIOD_CHOICES = [
+        (PERIOD_DAY, "Per day"),
+        (PERIOD_WEEK, "Per week"),
+        (PERIOD_MONTH, "Per month"),
+    ]
+
+    DEFAULT_AMOUNTS = {
+        PERIOD_DAY: Decimal("10000.00"),
+        PERIOD_WEEK: Decimal("50000.00"),
+        PERIOD_MONTH: Decimal("200000.00"),
+    }
+
+    user = models.ForeignKey(
+        "userauths.User",
+        on_delete=models.CASCADE,
+        related_name="transfer_limits",
+    )
+    period = models.CharField(max_length=10, choices=PERIOD_CHOICES)
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["period"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "period"],
+                name="unique_limit_per_user_period",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} / {self.period} / {self.amount}"

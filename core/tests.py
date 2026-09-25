@@ -10,6 +10,7 @@ wiring and scoping rather than just the helpers.
 values below hardcode it on purpose, so the tests do not import the module they
 are testing.
 """
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.cache import cache
@@ -19,7 +20,12 @@ from django.utils import timezone
 
 from account.models import Account, Category, KYC
 from audit.models import LogEntry
-from core.models import Transaction
+from core.models import Transaction, TransferLimit
+from core.security import (
+    _used_in_period,
+    check_transfer_limit,
+    ensure_transfer_limits,
+)
 from userauths.models import User
 
 PASSWORD = "pw-Phase-1.5-test"
@@ -1117,3 +1123,168 @@ class TransactionCategoryTests(MoneyMovementTestBase):
         self.assertIsNone(
             Transaction.objects.filter(pk=txn.pk).values("category").get()["category"]
         )
+
+
+# =====================================================================
+# Phase G-1  per-user transfer limits
+# =====================================================================
+class TransferLimitTests(MoneyMovementTestBase):
+    """``core.security``'s limit helpers.
+
+    Helper-level rather than view-level, unlike the rest of this module: the
+    window arithmetic is the thing under test, and ``Transaction.date`` is
+    ``auto_now_add``, so a transaction that belongs 40 days in the past can only
+    be built with an UPDATE. Nothing here posts to a money view -- Phase G-1
+    wires the checker into no call site, and G-2 is what will.
+
+    Every limit-window test lowers the *daily* limit below the fixture's
+    transaction amounts on purpose. Left at the 10,000 default, "95.00 of
+    failed volume plus 100.00 more fits" would pass whether or not the failure
+    rule works at all.
+    """
+
+    def set_limit(self, period, amount, user=None):
+        limit, _created = TransferLimit.objects.update_or_create(
+            user=user or self.alice, period=period,
+            defaults={"amount": Decimal(amount)},
+        )
+        return limit
+
+    def outgoing(self, amount, status="completed", when=None):
+        """A transfer alice sent: money out of her account."""
+        txn = self.create_transfer(amount=amount, status=status)
+        if when is not None:
+            # date is auto_now_add, so it can only be moved with an UPDATE.
+            Transaction.objects.filter(pk=txn.pk).update(date=when)
+            txn.refresh_from_db()
+        return txn
+
+    def incoming_transfer(self, amount, status="completed"):
+        """A transfer alice received: money into her account, not out of it."""
+        return Transaction.objects.create(
+            user=self.bob, sender=self.bob, reciever=self.alice,
+            sender_account=self.bob_acct, reciever_account=self.alice_acct,
+            amount=Decimal(amount), status=status, transaction_type="transfer",
+        )
+
+    def incoming_request(self, amount, status="request_settled"):
+        """A settled request alice must pay, per the direction rule.
+
+        ``create_request`` stores alice as the requester and bob as the payer;
+        this is the other way round, so alice is the *reciever* and the money
+        leaves her account when it settles.
+        """
+        return Transaction.objects.create(
+            user=self.bob, sender=self.bob, reciever=self.alice,
+            sender_account=self.bob_acct, reciever_account=self.alice_acct,
+            amount=Decimal(amount), status=status, transaction_type="request",
+        )
+
+    # ------------------------------------------------------ lazy creation
+    def test_ensure_creates_three_rows_on_first_call(self):
+        self.assertEqual(TransferLimit.objects.filter(user=self.alice).count(), 0)
+
+        limits = ensure_transfer_limits(self.alice)
+
+        self.assertEqual(sorted(limits), ["day", "month", "week"])
+        self.assertEqual(TransferLimit.objects.filter(user=self.alice).count(), 3)
+        for period, expected in TransferLimit.DEFAULT_AMOUNTS.items():
+            with self.subTest(period=period):
+                self.assertEqual(limits[period].amount, expected)
+        self.assertEqual(limits["day"].amount, Decimal("10000.00"))
+        self.assertEqual(limits["week"].amount, Decimal("50000.00"))
+        self.assertEqual(limits["month"].amount, Decimal("200000.00"))
+
+    def test_ensure_is_idempotent(self):
+        first = ensure_transfer_limits(self.alice)
+        second = ensure_transfer_limits(self.alice)
+
+        self.assertEqual(sorted(second), ["day", "month", "week"])
+        self.assertEqual(TransferLimit.objects.filter(user=self.alice).count(), 3)
+        # Same rows, not a second set.
+        self.assertEqual(
+            {p: tl.pk for p, tl in first.items()},
+            {p: tl.pk for p, tl in second.items()},
+        )
+
+    # -------------------------------------------------------- the verdict
+    def test_check_passes_when_under_limit(self):
+        ok, details = check_transfer_limit(self.alice, 100)
+        self.assertTrue(ok)
+        self.assertIsNone(details["period"])
+
+    def test_check_fails_daily_first(self):
+        self.set_limit("day", "100.00")
+        self.outgoing("95.00")
+
+        ok, details = check_transfer_limit(self.alice, Decimal("10.00"))
+
+        self.assertFalse(ok)
+        self.assertEqual(details["period"], "day")
+        self.assertEqual(details["used"], Decimal("95.00"))
+        self.assertEqual(details["limit"], Decimal("100.00"))
+        self.assertEqual(details["would_be"], Decimal("105.00"))
+
+    def test_check_ignores_failed_transactions(self):
+        self.set_limit("day", "100.00")
+        self.outgoing("95.00", status="failed")
+
+        ok, details = check_transfer_limit(self.alice, Decimal("100.00"))
+
+        self.assertTrue(ok, details)
+        self.assertIsNone(details["period"])
+        # And the failed row really is in the day window -- it is the status
+        # filter, not an empty window, that lets this through.
+        self.assertEqual(
+            Transaction.objects.filter(
+                sender=self.alice, transaction_type="transfer"
+            ).count(),
+            1,
+        )
+
+    def test_check_ignores_incoming(self):
+        self.set_limit("day", "100.00")
+        self.incoming_transfer("95.00")
+
+        ok, details = check_transfer_limit(self.alice, Decimal("100.00"))
+
+        self.assertTrue(ok, details)
+        self.assertIsNone(details["period"])
+
+    def test_check_respects_period_boundaries(self):
+        self.set_limit("day", "10000.00")
+        self.outgoing("9999.00", when=timezone.now() - timedelta(days=40))
+
+        ok, details = check_transfer_limit(self.alice, Decimal("500.00"))
+
+        self.assertTrue(ok, details)
+        # The 9,999.00 would have broken the day limit if it were in the
+        # window, so the zero is what proves the boundary is applied.
+        self.assertEqual(_used_in_period(self.alice, "day"), Decimal("0.00"))
+        self.assertEqual(_used_in_period(self.alice, "month"), Decimal("0.00"))
+
+    def test_check_uses_direction_rule_for_requests(self):
+        self.set_limit("day", "100.00")
+        self.incoming_request("100.00")
+
+        ok, details = check_transfer_limit(self.alice, Decimal("1.00"))
+
+        self.assertFalse(ok)
+        self.assertEqual(details["period"], "day")
+        self.assertEqual(details["used"], Decimal("100.00"))
+        self.assertEqual(details["would_be"], Decimal("101.00"))
+
+    # ------------------------------------------------------ bad arguments
+    def test_check_rejects_nonpositive_amount(self):
+        for amount in (0, -5):
+            with self.subTest(amount=amount):
+                ok, details = check_transfer_limit(self.alice, amount)
+                self.assertFalse(ok)
+                self.assertIsNone(details["period"])
+                self.assertIn("reason", details)
+
+    def test_check_rejects_no_user(self):
+        ok, details = check_transfer_limit(None, 10)
+        self.assertFalse(ok)
+        self.assertIsNone(details["period"])
+        self.assertIn("reason", details)
