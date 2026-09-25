@@ -1,0 +1,47 @@
+{% extends "partials/base.html" %}
+{% block title %}Verify your identity · O-Banking{% endblock %}
+
+{% block content %}
+<div class="container-xl py-6">
+  <div class="row justify-content-center">
+    <div class="col-lg-5">
+      <div class="card">
+        <div class="card-body">
+          <div class="text-center mb-4">
+            {# The one permitted inline style: it scales a single glyph. Tabler #}
+            {# expresses icon size through container font-size, which would also #}
+            {# resize the heading and copy beside it. #}
+            <i class="ti ti-shield-lock" style="font-size: 2.5rem;"></i>
+            <h1 class="h2 mt-3 mb-1">Two-factor verification</h1>
+            <p class="text-secondary small">
+              Enter the 6-digit code from your authenticator app, or use
+              one of your recovery codes.
+            </p>
+          </div>
+          <form method="post">
+            {% csrf_token %}
+            <div class="mb-3">
+              <label class="form-label" for="code">Code</label>
+              <input type="text" name="code" id="code"
+                     inputmode="text" autocomplete="one-time-code"
+                     maxlength="12" class="form-control form-control-lg text-center"
+                     placeholder="000000" autofocus required>
+              {% if error %}
+                <div class="text-danger small mt-1">{{ error }}</div>
+              {% endif %}
+            </div>
+            <button type="submit" class="btn btn-primary w-100">
+              Verify
+            </button>
+          </form>
+          <div class="text-center mt-3">
+            <a href="{% url 'userauths:sign-in' %}" class="text-secondary small">
+              Cancel and sign in again
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

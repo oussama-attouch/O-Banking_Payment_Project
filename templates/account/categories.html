@@ -1,0 +1,127 @@
+{% extends "partials/dashboard-base.html" %}
+{% block title %}Categories · O-Banking{% endblock %}
+{% block content %}
+<div class="container-xl py-4">
+
+  <div class="row row-deck row-cards">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-body">
+          <div class="d-flex align-items-center">
+            <div>
+              <h2 class="h3 mb-1">Categories</h2>
+              <div class="text-secondary">
+                Group your spending. Categories appear in the dashboard as a
+                spend-by-category chart.
+              </div>
+            </div>
+            <div class="ms-auto">
+              <span class="badge bg-blue-lt">{{ categories|length }} categor{{ categories|length|pluralize:"y,ies" }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row row-deck row-cards mt-3">
+
+    <div class="col-lg-4">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Add a category</h2>
+        </div>
+        <div class="card-body">
+          <form method="post" action="{% url 'account:categories' %}">
+            {% csrf_token %}
+            <div class="mb-3">
+              <label class="form-label" for="{{ form.name.id_for_label }}">Name</label>
+              {{ form.name }}
+              {% if form.name.help_text %}
+              <div class="form-hint">{{ form.name.help_text }}</div>
+              {% endif %}
+              {% for error in form.name.errors %}
+              <div class="text-danger small mt-1">{{ error }}</div>
+              {% endfor %}
+            </div>
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label" for="{{ form.icon.id_for_label }}">Icon</label>
+                {{ form.icon }}
+              </div>
+              <div class="col-6">
+                <label class="form-label" for="{{ form.color.id_for_label }}">Color</label>
+                {{ form.color }}
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100 mt-3">Save category</button>
+            <div class="text-secondary small mt-2">Categories are private to your account.</div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">Your categories</h2>
+        </div>
+
+        {% if categories %}
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Transactions</th>
+                <th>Added</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for category in categories %}
+              <tr>
+                <td>
+                  {% comment %}
+                  Two of the model's choice values have no Tabler class of their
+                  own, so they are mapped here rather than in the model:
+                    icon  cart -> ti-shopping-cart (Tabler's name for it)
+                    color gray -> bg-secondary-lt (there is no bg-gray-lt)
+                  The other choices are used as-is.
+                  {% endcomment %}
+                  <i class="ti {% if category.icon == 'cart' %}ti-shopping-cart{% else %}ti-{{ category.icon }}{% endif %}"></i>
+                  <span class="badge {% if category.color == 'gray' %}bg-secondary-lt{% else %}bg-{{ category.color }}-lt{% endif %}">{{ category.name }}</span>
+                </td>
+                <td class="text-secondary">{{ category.txn_count }}</td>
+                <td class="text-secondary">{{ category.created_at|date:"M j, Y" }}</td>
+                <td class="text-end">
+                  <form method="post" action="{% url 'account:category_delete' category.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                      <i class="ti ti-trash"></i> Remove
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="card-body">
+          <div class="empty">
+            <div class="empty-icon text-secondary"><i class="ti ti-tag fs-1"></i></div>
+            <p class="empty-title">No categories yet</p>
+            <p class="empty-subtitle text-secondary">
+              Add one using the form on the left.
+            </p>
+          </div>
+        </div>
+        {% endif %}
+
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

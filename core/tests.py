@@ -10,14 +10,22 @@ wiring and scoping rather than just the helpers.
 values below hardcode it on purpose, so the tests do not import the module they
 are testing.
 """
+from datetime import timedelta
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.test import Client, TestCase, override_settings
 from django.urls import get_resolver, reverse
 from django.utils import timezone
 
-from account.models import Account, KYC
-from core.models import Transaction
+from account.models import Account, Category, KYC
+from audit.models import LogEntry
+from core.models import Transaction, TransferLimit
+from core.security import (
+    _used_in_period,
+    check_transfer_limit,
+    ensure_transfer_limits,
+)
 from userauths.models import User
 
 PASSWORD = "pw-Phase-1.5-test"
@@ -913,3 +921,585 @@ class SettlementMessageTests(MoneyMovementTestBase):
         # And the completion page still renders with the username fallback.
         done = payer.get(resp["Location"])
         self.assertEqual(done.status_code, 200)
+
+
+# =====================================================================
+# Phase B  rate limiting on the four credential-checking endpoints
+# =====================================================================
+class RateLimitTests(MoneyMovementTestBase):
+    """Brute force is refused with 429 and recorded, and only where it should be.
+
+    ``cache`` is the process-wide LocMemCache, and Django does *not* clear it
+    between tests, so counters would otherwise leak from one test -- or one test
+    class -- into the next. Two consequences, both load-bearing:
+
+    * ``setUp`` clears it, so each test starts from a zeroed window.
+    * ``tearDown`` clears it again. Without that, a test that exhausts
+      ``transfer:1`` (alice's pk) leaves an 11-attempt counter behind, and the
+      *later* money tests -- TransferFlowTests and friends, which POST to the
+      same view as a user with pk 1 -- would answer 429 instead of moving money.
+    """
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
+    # ------------------------------------------------------------- helpers
+    def login(self, client, email, password):
+        return client.post(reverse("userauths:sign-in"),
+                           {"email": email, "password": password})
+
+    def bob_client(self):
+        client = Client()
+        client.force_login(self.bob)
+        return client
+
+    # ------------------------------------------------------------- login
+    def test_login_allows_five_attempts(self):
+        for attempt in range(1, 6):
+            with self.subTest(attempt=attempt):
+                resp = self.login(Client(), self.alice.email, "wrong-password")
+                self.assertIn(resp.status_code, (200, 302),
+                              "attempt %d returned %s" % (attempt, resp.status_code))
+                self.assertNotEqual(resp.status_code, 429)
+
+    def test_login_sixth_attempt_is_429(self):
+        for _ in range(5):
+            self.login(Client(), self.alice.email, "wrong-password")
+        resp = self.login(Client(), self.alice.email, "wrong-password")
+        self.assertEqual(resp.status_code, 429)
+        self.assertContains(resp, "Too many requests", status_code=429)
+
+    def test_login_limit_is_per_email(self):
+        for _ in range(5):
+            self.login(Client(), self.alice.email, "wrong-password")
+
+        resp = self.login(Client(), self.bob.email, "wrong-password")
+        self.assertNotEqual(resp.status_code, 429,
+                            "bob's first attempt was refused by alice's counter")
+
+    def test_login_success_resets_counter(self):
+        for _ in range(3):
+            self.login(Client(), self.alice.email, "wrong-password")
+
+        ok = self.login(Client(), self.alice.email, PASSWORD)
+        self.assertEqual(ok.status_code, 302)
+        self.assertIn("/account/", ok["Location"])
+
+        for attempt in range(1, 5):
+            with self.subTest(after_reset=attempt):
+                resp = self.login(Client(), self.alice.email, "wrong-password")
+                self.assertNotEqual(resp.status_code, 429,
+                                    "counter survived a successful login")
+
+    def test_login_get_does_not_consume_quota(self):
+        client = Client()
+        for _ in range(10):
+            self.assertEqual(client.get(reverse("userauths:sign-in")).status_code, 200)
+
+        resp = self.login(client, self.alice.email, "wrong-password")
+        self.assertNotEqual(resp.status_code, 429,
+                            "GET requests consumed the quota")
+
+    # ------------------------------------------------------------- money paths
+    def test_transfer_rate_limit_triggers(self):
+        txn = self.create_transfer()
+        url = self.transfer_process_url(txn)
+
+        for attempt in range(1, 11):
+            with self.subTest(attempt=attempt):
+                resp = self.client.post(url, {"password": "wrong-password"})
+                self.assertNotEqual(resp.status_code, 429,
+                                    "attempt %d was refused too early" % attempt)
+
+        resp = self.client.post(url, {"password": "wrong-password"})
+        self.assertEqual(resp.status_code, 429)
+        self.assertContains(resp, "Too many requests", status_code=429)
+
+        # Refused before the view ran, so no money moved and the txn is untouched.
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "processing")
+        self.assertEqual(self.balances(), (Decimal("1000.00"), Decimal("500.00")))
+
+    def test_rate_limit_writes_audit_entry(self):
+        for _ in range(5):
+            self.login(Client(), self.alice.email, "wrong-password")
+        resp = self.login(Client(), self.alice.email, "wrong-password")
+        self.assertEqual(resp.status_code, 429)
+
+        entries = LogEntry.objects.filter(action="rate_limited")
+        self.assertEqual(entries.count(), 1, "expected exactly one audit entry")
+        entry = entries.get()
+        self.assertEqual(entry.metadata.get("key"), "login:%s" % self.alice.email)
+        self.assertEqual(entry.metadata.get("limit"), 5)
+        self.assertEqual(entry.metadata.get("window_seconds"), 15 * 60)
+        self.assertEqual(entry.metadata.get("label"), "login")
+        self.assertEqual(entry.metadata.get("count"), 6)
+        # The login page is reached anonymously, so there is no actor.
+        self.assertIsNone(entry.actor)
+
+    def test_rate_limit_key_depends_on_user_for_transfer(self):
+        txn = self.create_transfer()
+        url = self.transfer_process_url(txn)
+
+        for _ in range(10):
+            self.client.post(url, {"password": "wrong-password"})
+        self.assertEqual(
+            self.client.post(url, {"password": "wrong-password"}).status_code, 429
+        )
+
+        resp = self.bob_client().post(url, {"password": "wrong-password"})
+        self.assertNotEqual(resp.status_code, 429,
+                            "bob inherited alice's transfer counter")
+
+        # The money path names its actor: the refusal is attributable.
+        entry = LogEntry.objects.filter(action="rate_limited").get()
+        self.assertEqual(entry.metadata.get("key"), "transfer:%s" % self.alice.pk)
+        self.assertEqual(entry.metadata.get("label"), "transfer")
+        self.assertEqual(entry.metadata.get("window_seconds"), 3600)
+        self.assertEqual(entry.actor, self.alice)
+
+
+# =====================================================================
+# Phase E-1  Transaction.category
+# =====================================================================
+class TransactionCategoryTests(MoneyMovementTestBase):
+    """The new FK is optional, settable, and SET_NULL on category delete.
+
+    Category is *not* part of the money path: the E-1 rule was one nullable
+    column, so nothing here changes how a transfer is written.
+    """
+
+    def category(self, name="Groceries"):
+        # The post_save receiver already gave alice the six defaults.
+        return Category.objects.get(user=self.alice, slug=name.lower())
+
+    def test_transaction_category_is_optional(self):
+        txn = self.create_transfer()
+        self.assertIsNone(txn.category)
+        self.assertIsNone(txn.category_id)
+        txn.refresh_from_db()
+        self.assertIsNone(txn.category_id)
+
+    def test_transaction_category_can_be_set(self):
+        category = self.category()
+        txn = self.create_transfer()
+        txn.category = category
+        txn.save()
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.category_id, category.pk)
+        self.assertEqual(txn.category, category)
+        # Same row from the other direction.
+        self.assertIn(txn, category.transactions.all())
+
+    def test_category_delete_sets_transaction_category_to_null(self):
+        category = self.category("Housing")
+        txn = self.create_transfer()
+        txn.category = category
+        txn.save()
+
+        category.delete()
+        txn.refresh_from_db()
+        self.assertIsNone(txn.category_id)
+        self.assertTrue(Transaction.objects.filter(pk=txn.pk).exists())
+
+    def test_transaction_category_nullable_with_existing_rows(self):
+        """Rows written before categories existed read back as NULL.
+
+        The schema migration added the column with no default and the data
+        migration only creates categories -- it never touches transactions -- so
+        a row created without one stays uncategorised.
+        """
+        txn = self.create_transfer()
+        stored = Transaction.objects.filter(pk=txn.pk).values_list(
+            "category_id", flat=True
+        ).get()
+        self.assertIsNone(stored)
+        self.assertIsNone(
+            Transaction.objects.filter(pk=txn.pk).values("category").get()["category"]
+        )
+
+
+# =====================================================================
+# Phase G-1  per-user transfer limits
+# =====================================================================
+class TransferLimitTests(MoneyMovementTestBase):
+    """``core.security``'s limit helpers.
+
+    Helper-level rather than view-level, unlike the rest of this module: the
+    window arithmetic is the thing under test, and ``Transaction.date`` is
+    ``auto_now_add``, so a transaction that belongs 40 days in the past can only
+    be built with an UPDATE. Nothing here posts to a money view -- Phase G-1
+    wires the checker into no call site, and G-2 is what will.
+
+    Every limit-window test lowers the *daily* limit below the fixture's
+    transaction amounts on purpose. Left at the 10,000 default, "95.00 of
+    failed volume plus 100.00 more fits" would pass whether or not the failure
+    rule works at all.
+    """
+
+    def set_limit(self, period, amount, user=None):
+        limit, _created = TransferLimit.objects.update_or_create(
+            user=user or self.alice, period=period,
+            defaults={"amount": Decimal(amount)},
+        )
+        return limit
+
+    def outgoing(self, amount, status="completed", when=None):
+        """A transfer alice sent: money out of her account."""
+        txn = self.create_transfer(amount=amount, status=status)
+        if when is not None:
+            # date is auto_now_add, so it can only be moved with an UPDATE.
+            Transaction.objects.filter(pk=txn.pk).update(date=when)
+            txn.refresh_from_db()
+        return txn
+
+    def incoming_transfer(self, amount, status="completed"):
+        """A transfer alice received: money into her account, not out of it."""
+        return Transaction.objects.create(
+            user=self.bob, sender=self.bob, reciever=self.alice,
+            sender_account=self.bob_acct, reciever_account=self.alice_acct,
+            amount=Decimal(amount), status=status, transaction_type="transfer",
+        )
+
+    def incoming_request(self, amount, status="request_settled"):
+        """A settled request alice must pay, per the direction rule.
+
+        ``create_request`` stores alice as the requester and bob as the payer;
+        this is the other way round, so alice is the *reciever* and the money
+        leaves her account when it settles.
+        """
+        return Transaction.objects.create(
+            user=self.bob, sender=self.bob, reciever=self.alice,
+            sender_account=self.bob_acct, reciever_account=self.alice_acct,
+            amount=Decimal(amount), status=status, transaction_type="request",
+        )
+
+    # ------------------------------------------------------ lazy creation
+    def test_ensure_creates_three_rows_on_first_call(self):
+        self.assertEqual(TransferLimit.objects.filter(user=self.alice).count(), 0)
+
+        limits = ensure_transfer_limits(self.alice)
+
+        self.assertEqual(sorted(limits), ["day", "month", "week"])
+        self.assertEqual(TransferLimit.objects.filter(user=self.alice).count(), 3)
+        for period, expected in TransferLimit.DEFAULT_AMOUNTS.items():
+            with self.subTest(period=period):
+                self.assertEqual(limits[period].amount, expected)
+        self.assertEqual(limits["day"].amount, Decimal("10000.00"))
+        self.assertEqual(limits["week"].amount, Decimal("50000.00"))
+        self.assertEqual(limits["month"].amount, Decimal("200000.00"))
+
+    def test_ensure_is_idempotent(self):
+        first = ensure_transfer_limits(self.alice)
+        second = ensure_transfer_limits(self.alice)
+
+        self.assertEqual(sorted(second), ["day", "month", "week"])
+        self.assertEqual(TransferLimit.objects.filter(user=self.alice).count(), 3)
+        # Same rows, not a second set.
+        self.assertEqual(
+            {p: tl.pk for p, tl in first.items()},
+            {p: tl.pk for p, tl in second.items()},
+        )
+
+    # -------------------------------------------------------- the verdict
+    def test_check_passes_when_under_limit(self):
+        ok, details = check_transfer_limit(self.alice, 100)
+        self.assertTrue(ok)
+        self.assertIsNone(details["period"])
+
+    def test_check_fails_daily_first(self):
+        self.set_limit("day", "100.00")
+        self.outgoing("95.00")
+
+        ok, details = check_transfer_limit(self.alice, Decimal("10.00"))
+
+        self.assertFalse(ok)
+        self.assertEqual(details["period"], "day")
+        self.assertEqual(details["used"], Decimal("95.00"))
+        self.assertEqual(details["limit"], Decimal("100.00"))
+        self.assertEqual(details["would_be"], Decimal("105.00"))
+
+    def test_check_ignores_failed_transactions(self):
+        self.set_limit("day", "100.00")
+        self.outgoing("95.00", status="failed")
+
+        ok, details = check_transfer_limit(self.alice, Decimal("100.00"))
+
+        self.assertTrue(ok, details)
+        self.assertIsNone(details["period"])
+        # And the failed row really is in the day window -- it is the status
+        # filter, not an empty window, that lets this through.
+        self.assertEqual(
+            Transaction.objects.filter(
+                sender=self.alice, transaction_type="transfer"
+            ).count(),
+            1,
+        )
+
+    def test_check_ignores_incoming(self):
+        self.set_limit("day", "100.00")
+        self.incoming_transfer("95.00")
+
+        ok, details = check_transfer_limit(self.alice, Decimal("100.00"))
+
+        self.assertTrue(ok, details)
+        self.assertIsNone(details["period"])
+
+    def test_check_respects_period_boundaries(self):
+        self.set_limit("day", "10000.00")
+        self.outgoing("9999.00", when=timezone.now() - timedelta(days=40))
+
+        ok, details = check_transfer_limit(self.alice, Decimal("500.00"))
+
+        self.assertTrue(ok, details)
+        # The 9,999.00 would have broken the day limit if it were in the
+        # window, so the zero is what proves the boundary is applied.
+        self.assertEqual(_used_in_period(self.alice, "day"), Decimal("0.00"))
+        self.assertEqual(_used_in_period(self.alice, "month"), Decimal("0.00"))
+
+    def test_check_uses_direction_rule_for_requests(self):
+        self.set_limit("day", "100.00")
+        self.incoming_request("100.00")
+
+        ok, details = check_transfer_limit(self.alice, Decimal("1.00"))
+
+        self.assertFalse(ok)
+        self.assertEqual(details["period"], "day")
+        self.assertEqual(details["used"], Decimal("100.00"))
+        self.assertEqual(details["would_be"], Decimal("101.00"))
+
+    # ------------------------------------------------------ bad arguments
+    def test_check_rejects_nonpositive_amount(self):
+        for amount in (0, -5):
+            with self.subTest(amount=amount):
+                ok, details = check_transfer_limit(self.alice, amount)
+                self.assertFalse(ok)
+                self.assertIsNone(details["period"])
+                self.assertIn("reason", details)
+
+    def test_check_rejects_no_user(self):
+        ok, details = check_transfer_limit(None, 10)
+        self.assertFalse(ok)
+        self.assertIsNone(details["period"])
+        self.assertIn("reason", details)
+
+
+# =====================================================================
+# Phase G-2  the limit enforced inside the money path
+# =====================================================================
+class TransferLimitEnforcementTests(MoneyMovementTestBase):
+    """TransferProcess and Settlement_processing refuse an over-limit movement.
+
+    View-level, like the rest of this module: every assertion drives the real
+    confirmation endpoint, so it is the wiring and the guard ORDER under test,
+    not the helper (TransferLimitTests covers that).
+
+    ``cache`` is the process-wide LocMemCache and both endpoints are rate
+    limited to 10 POSTs per user per hour, with the counters surviving from one
+    test to the next. This class POSTs more often than that as alice (always
+    pk 1 after the per-test rollback), so it clears the cache on both sides of
+    every test, exactly as RateLimitTests does and for the same reason: the
+    classes that run after this one alphabetically must not inherit counters.
+    """
+
+    def setUp(self):
+        cache.clear()
+        super().setUp()
+        self.alice_acct.refresh_from_db()
+        self.bob_acct.refresh_from_db()
+
+    def tearDown(self):
+        cache.clear()
+        super().tearDown()
+
+    # ------------------------------------------------------------- helpers
+    def set_limit(self, user, amount, period="day"):
+        TransferLimit.objects.update_or_create(
+            user=user, period=period,
+            defaults={"amount": Decimal(amount)},
+        )
+
+    def confirm_transfer(self, txn, client=None):
+        return (client or self.client).post(
+            self.transfer_process_url(txn), {"password": PASSWORD}
+        )
+
+    def prior_outgoing(self, amount, status="completed"):
+        """A transfer alice sent earlier today, already in its final status.
+
+        Written straight to the table: these tests are about what the sum
+        already contains, not about how it got there.
+        """
+        return self.create_transfer(amount=amount, status=status)
+
+    def confirm_settlement(self, txn, client=None):
+        return (client or self.payer_client()).post(
+            self.settlement_process_url(txn), {"password": PASSWORD}
+        )
+
+    def rate_limited_entries(self, kind="transfer_limit"):
+        return LogEntry.objects.filter(
+            action="rate_limited", metadata__kind=kind
+        )
+
+    # ------------------------------------------------------------ transfers
+    def test_transfer_under_limit_completes(self):
+        txn = self.create_transfer(amount="50.00")
+
+        resp = self.confirm_transfer(txn)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("transfer-completed", resp["Location"])
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "completed")
+        self.assertEqual(self.balances(), (Decimal("950.00"), Decimal("550.00")))
+        self.assertFalse(self.rate_limited_entries().exists())
+
+    def test_transfer_over_limit_refused(self):
+        self.set_limit(self.alice, "100.00")
+        txn = self.create_transfer(amount="150.00")
+        before = self.balances()
+
+        resp = self.confirm_transfer(txn)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("transfer-confirmation", resp["Location"])
+        self.assertNotIn("transfer-completed", resp["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "processing")
+        self.assertEqual(self.balances(), before)
+
+        entries = self.rate_limited_entries()
+        self.assertEqual(entries.count(), 1)
+        self.assertEqual(entries.get().metadata["kind"], "transfer_limit")
+        self.assertEqual(entries.get().metadata["period"], "day")
+        # Compared as Decimals: the audit stores str() of the SUM's result, and
+        # SQLite hands that back without trailing zeros ("0", not "0.00").
+        self.assertEqual(Decimal(entries.get().metadata["used"]), Decimal("0.00"))
+        self.assertEqual(Decimal(entries.get().metadata["limit"]), Decimal("100.00"))
+        self.assertEqual(Decimal(entries.get().metadata["amount"]), Decimal("150.00"))
+
+    def test_transfer_exactly_at_limit_passes(self):
+        self.set_limit(self.alice, "100.00")
+        txn = self.create_transfer(amount="100.00")
+
+        # The in-flight row is still "processing", and only settled money counts
+        # towards the window. If this row counted, the confirmation below would
+        # be measuring the transfer against itself (100 in the window + 100 more
+        # = 200 > 100) and would refuse a transfer that exactly meets the limit.
+        self.assertEqual(_used_in_period(self.alice, "day"), Decimal("0.00"))
+
+        resp = self.confirm_transfer(txn)
+
+        self.assertIn("transfer-completed", resp["Location"])
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "completed")
+        # 100.00 is not "more than" the limit, so the full amount moves.
+        self.assertEqual(self.balances(), (Decimal("900.00"), Decimal("600.00")))
+        # Now that it has settled, it does count -- for the next transfer.
+        self.assertEqual(_used_in_period(self.alice, "day"), Decimal("100.00"))
+
+    def test_transfer_over_limit_after_prior_transfer(self):
+        self.set_limit(self.alice, "100.00")
+        self.prior_outgoing("40.00")
+        self.prior_outgoing("40.00")
+        txn = self.create_transfer(amount="30.00")
+        before = self.balances()
+
+        resp = self.confirm_transfer(txn)
+
+        self.assertIn("transfer-confirmation", resp["Location"])
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "processing")
+        self.assertEqual(self.balances(), before)
+
+        entry = self.rate_limited_entries().get()
+        self.assertEqual(Decimal(entry.metadata["used"]), Decimal("80.00"))
+        self.assertEqual(Decimal(entry.metadata["limit"]), Decimal("100.00"))
+
+    def test_transfer_failed_prior_does_not_count(self):
+        self.set_limit(self.alice, "100.00")
+        self.prior_outgoing("500.00", status="failed")
+        txn = self.create_transfer(amount="50.00")
+
+        resp = self.confirm_transfer(txn)
+
+        self.assertIn("transfer-completed", resp["Location"])
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "completed")
+        self.assertEqual(self.balances(), (Decimal("950.00"), Decimal("550.00")))
+        self.assertFalse(self.rate_limited_entries().exists())
+
+    # ---------------------------------------------------------- settlements
+    def test_settlement_over_limit_refused(self):
+        self.set_limit(self.bob, "100.00")  # bob is the payer
+        txn = self.create_request(amount="150.00", status="request_sent")
+        before = self.balances()
+
+        resp = self.confirm_settlement(txn)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("settlement-confirmation", resp["Location"])
+        self.assertNotIn("settlement-completed", resp["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_sent")
+        self.assertEqual(self.balances(), before)
+
+        entries = self.rate_limited_entries()
+        self.assertEqual(entries.count(), 1)
+        self.assertEqual(entries.get().metadata["kind"], "transfer_limit")
+        self.assertEqual(entries.get().metadata["period"], "day")
+        self.assertEqual(entries.get().metadata["limit"], "100.00")
+
+    def test_settlement_under_limit_completes(self):
+        self.set_limit(self.bob, "1000.00")
+        txn = self.create_request(amount="150.00", status="request_sent")
+
+        resp = self.confirm_settlement(txn)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("settlement-completed", resp["Location"])
+
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "request_settled")
+        # bob (the stored reciever) pays; alice (the requester) is credited.
+        self.assertEqual(self.balances(), (Decimal("1150.00"), Decimal("350.00")))
+        self.assertFalse(self.rate_limited_entries().exists())
+
+    # ------------------------------------------------------ the other party
+    def test_limit_does_not_apply_to_receiver(self):
+        self.set_limit(self.alice, "1.00")  # the receiver's limit is tiny
+        txn = Transaction.objects.create(
+            user=self.bob, sender=self.bob, reciever=self.alice,
+            sender_account=self.bob_acct, reciever_account=self.alice_acct,
+            amount=Decimal("200.00"), status="processing",
+            transaction_type="transfer",
+        )
+        before = self.balances()
+
+        bob = Client()
+        bob.force_login(self.bob)
+        resp = bob.post(
+            reverse("core:transfer-process",
+                    args=[self.alice_acct.account_number, txn.transaction_id]),
+            {"password": PASSWORD},
+        )
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("transfer-completed", resp["Location"])
+        txn.refresh_from_db()
+        self.assertEqual(txn.status, "completed")
+        # bob's default limit (10,000.00) is what applied, not alice's 1.00.
+        self.assertEqual(
+            self.balances(),
+            (before[0] + Decimal("200.00"), before[1] - Decimal("200.00")),
+        )
+        self.assertFalse(self.rate_limited_entries().exists())

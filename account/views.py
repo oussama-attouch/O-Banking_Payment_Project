@@ -3,12 +3,14 @@ import datetime
 from decimal import Decimal
 
 from django.core.paginator import Paginator
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
 from account import analytics
@@ -17,19 +19,25 @@ from account.analytics import (
     PERIOD_DAYS,
     PERIOD_SHORT,
     TYPE_FILTER_CHOICES,
+    get_spend_by_category,
 )
 from account.models import (
     KYC,
     Account,
+    Category,
     Notification,
     Recipient,
+    SavingsGoal,
     SupportReply,
     SupportTicket,
 )
 from account.forms import (
+    AddToGoalForm,
+    CategoryForm,
     KYCForm,
     ProfileForm,
     RecipientForm,
+    SavingsGoalForm,
     SupportReplyForm,
     SupportTicketForm,
 )
@@ -37,6 +45,7 @@ from core.models import Transaction
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from audit.utils import log as audit_log
+from userauths.models import TOTPDevice
 
 def _kyc_required(request):
     """Shared gate for the dashboard views.
@@ -149,6 +158,7 @@ def dashboard(request):
 
     history_status = (request.GET.get("status") or "").strip()
     history_type = (request.GET.get("type") or "").strip()
+    history_q = (request.GET.get("q") or "").strip()
     try:
         page = int(request.GET.get("page", 1))
     except (TypeError, ValueError):
@@ -162,10 +172,15 @@ def dashboard(request):
             request.user,
             status=history_status or None,
             ttype=history_type or None,
+            q=history_q or None,
             page=page,
         ),
         "history_status": history_status,
         "history_type": history_type,
+        "history_q": history_q,
+        "spend_by_category": get_spend_by_category(
+            request.user, days=days, transaction_type=txn_type,
+        ),
         "history_choices": analytics.STATUS_CHOICES,
         "history_type_choices": analytics.TYPE_CHOICES,
         # The page-level filter, echoed back so the bar and the labels agree with
@@ -180,6 +195,13 @@ def dashboard(request):
         # "All time" has no window before it, so the delta labels have nothing
         # to compare against and the template says so.
         "compare_label": None if days is None else dict(PERIOD_CHOICES)[period],
+        # Phase F-2. The two most recent active goals, for the compact
+        # "Savings goals" card below the history. A plain queryset: the
+        # template checks truthiness, so a user with no goals renders no card
+        # and costs no extra query.
+        "active_goals": (SavingsGoal.objects
+                         .filter(user=request.user, is_completed=False)
+                         .order_by("-created_at")[:2]),
     }
     return render(request, "account/dashboard.html", context)
 
@@ -344,6 +366,7 @@ def settings_view(request):
         "account": account,
         "kyc": kyc,
         "profile_form": profile_form,
+        "totp_device": TOTPDevice.objects.filter(user=request.user).first(),
     }
     return render(request, "account/settings.html", context)
 
@@ -940,3 +963,208 @@ def support_detail(request, pk):
         "form": form,
     }
     return render(request, "account/support_detail.html", context)
+
+
+# =====================================================================
+# Phase E-2a  budget categories
+# =====================================================================
+@login_required
+def categories_view(request):
+    """List the user's categories and render the add form inline.
+
+    POST to this view creates a new category. Slug is derived
+    from the name; per-user uniqueness is enforced by the model
+    constraint, caught here as IntegrityError and surfaced as a
+    field error.
+    """
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    if request.method == "POST":
+        form = CategoryForm(request.POST)
+        if form.is_valid():
+            name = form.cleaned_data["name"]
+            slug = slugify(name)[:50] or "category"
+            try:
+                # The savepoint matters: a unique violation aborts the
+                # surrounding transaction on PostgreSQL and under
+                # ATOMIC_REQUESTS, and the re-render below would then raise
+                # TransactionManagementError instead of showing the error.
+                with transaction.atomic():
+                    category = Category.objects.create(
+                        user=request.user,
+                        name=name,
+                        slug=slug,
+                        icon=form.cleaned_data["icon"],
+                        color=form.cleaned_data["color"],
+                    )
+                audit_log("settings_changed", target=category,
+                          metadata={"category": "created"})
+                messages.success(request, f"Category “{category.name}” added.")
+                return redirect("account:categories")
+            except IntegrityError:
+                form.add_error("name",
+                    "You already have a category with this name.")
+    else:
+        form = CategoryForm()
+
+    # Annotate each category with its usage count in one query.
+    cats = (Category.objects
+            .filter(user=request.user)
+            .annotate(txn_count=Count("transactions")))
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "form": form,
+        "categories": cats,
+    }
+    return render(request, "account/categories.html", context)
+
+
+@login_required
+@require_POST
+def category_delete(request, pk):
+    """Delete one of the user's categories. POST-only.
+
+    SET_NULL on Transaction.category means existing transactions
+    are preserved; their category becomes NULL. The view warns
+    the user if any transactions were attached.
+    """
+    category = Category.objects.filter(pk=pk, user=request.user).first()
+    if category is None:
+        messages.warning(request, "Category not found.")
+        return redirect("account:categories")
+
+    txn_count = category.transactions.count()
+    name = category.name
+    category.delete()
+    audit_log("settings_changed", target=request.user,
+              metadata={"category": "deleted", "name": name,
+                        "detached_transactions": txn_count})
+
+    if txn_count:
+        messages.success(request,
+            f"Category “{name}” removed. {txn_count} transaction"
+            f"{'s' if txn_count != 1 else ''} moved to Uncategorized.")
+    else:
+        messages.success(request, f"Category “{name}” removed.")
+    return redirect("account:categories")
+
+
+# =====================================================================
+# Phase F-2  savings goals
+# =====================================================================
+@login_required
+def goals_view(request):
+    """List the user's savings goals; POST creates a new one.
+
+    Login-only, like categories and support: a savings goal is the user's
+    own bookkeeping, not banking data, so it does not go through
+    ``_kyc_required``. Progress is recorded by the user here; nothing in
+    this module touches a balance or the transfer flow.
+    """
+    account = getattr(request.user, "account", None)
+    kyc = getattr(request.user, "kyc", None)
+
+    if request.method == "POST":
+        form = SavingsGoalForm(request.POST)
+        if form.is_valid():
+            goal = form.save(commit=False)
+            goal.user = request.user
+            goal.save()
+            audit_log("settings_changed", target=goal,
+                      metadata={"goal": "created", "name": goal.name})
+            messages.success(request, f"Goal “{goal.name}” created.")
+            return redirect("account:goals")
+    else:
+        form = SavingsGoalForm()
+
+    active = (SavingsGoal.objects
+              .filter(user=request.user, is_completed=False)
+              .order_by("-created_at"))
+    completed = (SavingsGoal.objects
+                 .filter(user=request.user, is_completed=True)
+                 .order_by("-updated_at")[:20])
+
+    context = {
+        "account": account,
+        "kyc": kyc,
+        "form": form,
+        "active_goals": active,
+        "completed_goals": completed,
+        "add_form": AddToGoalForm(),
+    }
+    return render(request, "account/goals.html", context)
+
+
+@login_required
+@require_POST
+def goal_add(request, pk):
+    """Add to a goal's current_amount. POST-only, scoped to user.
+
+    ``login_required`` sits outside ``require_POST`` on purpose: an anonymous
+    GET is a sign-in redirect, an authenticated GET is a 405. The queryset is
+    scoped to ``request.user``, so another user's pk is a no-op rather than a
+    permission error that would confirm the row exists.
+    """
+    goal = SavingsGoal.objects.filter(pk=pk, user=request.user).first()
+    if goal is None:
+        messages.warning(request, "Goal not found.")
+        return redirect("account:goals")
+
+    form = AddToGoalForm(request.POST)
+    if not form.is_valid():
+        messages.warning(request, "Please enter a valid amount.")
+        return redirect("account:goals")
+
+    goal.current_amount = (goal.current_amount or Decimal("0.00")) + form.cleaned_data["amount"]
+    # Auto-complete when the target is reached.
+    if goal.current_amount >= goal.target_amount and not goal.is_completed:
+        goal.is_completed = True
+    goal.save(update_fields=["current_amount", "is_completed", "updated_at"])
+
+    audit_log("settings_changed", target=goal,
+              metadata={"goal": "contrib", "amount": str(form.cleaned_data["amount"])})
+    messages.success(request, f"Added to “{goal.name}”.")
+    return redirect("account:goals")
+
+
+@login_required
+@require_POST
+def goal_complete(request, pk):
+    """Toggle is_completed on the goal. POST-only, scoped to user.
+
+    A toggle rather than a one-way "complete": the completed list offers a
+    "Reopen" button, and both directions go through this one view so the
+    audit entry reads the same either way.
+    """
+    goal = SavingsGoal.objects.filter(pk=pk, user=request.user).first()
+    if goal is None:
+        messages.warning(request, "Goal not found.")
+        return redirect("account:goals")
+    goal.is_completed = not goal.is_completed
+    goal.save(update_fields=["is_completed", "updated_at"])
+    audit_log("settings_changed", target=goal,
+              metadata={"goal": "toggled", "completed": goal.is_completed})
+    return redirect("account:goals")
+
+
+@login_required
+@require_POST
+def goal_delete(request, pk):
+    """Delete one of the user's goals. POST-only, scoped to user.
+
+    The audit entry targets the user, not the goal: the row is gone by the
+    time the entry is written, so its pk would point at nothing.
+    """
+    goal = SavingsGoal.objects.filter(pk=pk, user=request.user).first()
+    if goal is None:
+        messages.warning(request, "Goal not found.")
+        return redirect("account:goals")
+    name = goal.name
+    goal.delete()
+    audit_log("settings_changed", target=request.user,
+              metadata={"goal": "deleted", "name": name})
+    messages.success(request, f"Goal “{name}” deleted.")
+    return redirect("account:goals")

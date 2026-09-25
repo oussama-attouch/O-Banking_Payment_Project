@@ -5,8 +5,14 @@ from django.db import transaction as db_transaction
 from django.db.models import Q
 from django.contrib import messages
 from core.models import Transaction
-from core.security import AmountError, find_party_transaction, parse_amount
+from core.security import (
+    AmountError,
+    check_transfer_limit,
+    find_party_transaction,
+    parse_amount,
+)
 from audit.utils import log as audit_log
+from core.ratelimit import rate_limit, user_key
 
 # Apply the login_required decorator to the function
 @login_required
@@ -146,6 +152,7 @@ def TransferConfirmation(request, account_number, transaction_id):
     return render(request, "transfer/transfer-confirmation.html", context)
 
 
+@rate_limit(user_key("transfer"), limit=10, window=3600, label="transfer")
 @login_required
 def TransferProcess(request, account_number, transaction_id):
     account = Account.objects.filter(account_number=account_number).first()
@@ -174,6 +181,8 @@ def TransferProcess(request, account_number, transaction_id):
             insufficient = False
             already_processed = False
             mismatch = False
+            limit_exceeded = False
+            limit_details = None
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
                 # so two concurrent transfers in opposite directions cannot
@@ -199,6 +208,18 @@ def TransferProcess(request, account_number, transaction_id):
                     .first()
                 )
 
+                # Phase G-2: the sender's per-user transfer limit. Evaluated
+                # once, here, so the chain below only reads _ok / _det. Its flag
+                # is tested AFTER the mismatch and status guards, which must
+                # keep firing first, and BEFORE the balance guard, because
+                # "this would exceed your limit" is the right answer whether or
+                # not the money is in the account. Guarded on locked_txn: a row
+                # that vanished between the fetch above and this lock is None,
+                # and that case is already answered by the first branch below.
+                _ok, _det = True, {}
+                if locked_txn is not None:
+                    _ok, _det = check_transfer_limit(request.user, locked_txn.amount)
+
                 # Phase 1.8: URL/transaction mismatch guard.
                 # The account_number in the URL must be the transaction's
                 # intended receiver account. Without this, either party could
@@ -215,6 +236,11 @@ def TransferProcess(request, account_number, transaction_id):
                     mismatch = True
                 elif locked_txn.status != "processing":
                     already_processed = True
+                elif not _ok:
+                    # Phase G-2: refused before the balance guard below, so a
+                    # limit rejection never reads as an affordability problem.
+                    limit_exceeded = True
+                    limit_details = _det
                 # The balance was only checked when the transaction was created.
                 # Re-check it against the LOCKED row, because the sender may have
                 # spent the money in the meantime. Rejecting here leaves the
@@ -237,6 +263,28 @@ def TransferProcess(request, account_number, transaction_id):
             if mismatch:
                 messages.warning(request, "This transaction does not match the account in the link.")
                 return redirect("core:transactions")
+
+            if limit_exceeded:
+                period = (limit_details or {}).get("period") or "period"
+                used = (limit_details or {}).get("used")
+                limit = (limit_details or {}).get("limit")
+                audit_log("rate_limited", target=locked_txn, metadata={
+                    "kind": "transfer_limit",
+                    "period": period,
+                    "used": str(used) if used is not None else None,
+                    "limit": str(limit) if limit is not None else None,
+                    "amount": str(locked_txn.amount),
+                })
+                messages.warning(
+                    request,
+                    f"This transfer would exceed your {period} limit. "
+                    f"You have used {used} of {limit}.",
+                )
+                return redirect(
+                    "core:transfer-confirmation",
+                    account.account_number,
+                    locked_txn.transaction_id,
+                )
 
             if already_processed:
                 messages.warning(request, "This transfer has already been processed.")

@@ -46,4 +46,17 @@ urlpatterns = [
     # so adding a ticket is a POST to "support", not a separate route.
     path("support/", views.support_view, name="support"),
     path("support/<int:pk>/", views.support_detail, name="support_detail"),
+
+    # Phase E-2a. Budget categories: list + inline add, and a POST-only delete.
+    # Deleting one SET_NULLs the transactions that pointed at it.
+    path("categories/", views.categories_view, name="categories"),
+    path("categories/<int:pk>/delete/", views.category_delete, name="category_delete"),
+
+    # Phase F-2. Savings goals: list + inline create, then three POST-only
+    # actions scoped to request.user. Progress is recorded by the user; no
+    # route here moves money.
+    path("goals/", views.goals_view, name="goals"),
+    path("goals/<int:pk>/add/", views.goal_add, name="goal_add"),
+    path("goals/<int:pk>/complete/", views.goal_complete, name="goal_complete"),
+    path("goals/<int:pk>/delete/", views.goal_delete, name="goal_delete"),
 ]

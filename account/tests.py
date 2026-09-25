@@ -26,9 +26,11 @@ from PIL import Image
 from account import analytics
 from account.models import (
     Account,
+    Category,
     KYC,
     Notification,
     Recipient,
+    SavingsGoal,
     SupportReply,
     SupportTicket,
 )
@@ -2071,3 +2073,674 @@ class SupportViewTests(TestCase):
             list(SupportTicket.objects.filter(user=self.alice)),
             [older, newer],
         )
+
+
+# =====================================================================
+# Phase D  full-text search on the transaction history
+# =====================================================================
+class SearchTests(DashboardAnalyticsTestBase):
+    """``?q=`` matches description, transaction id, and counterparty.
+
+    The fixture is deliberately tiny and the search terms are chosen so exactly
+    one row can match: "rent" appears only in t1's description, "carol" only in
+    t3's sender. No fixture username, email, or generated transaction id
+    contains either word.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.rent = self.make_txn(self.alice, self.bob, "100.00",
+                                  description="rent for october")
+        self.grocery = self.make_txn(self.alice, self.bob, "20.00",
+                                     description="grocery")
+        self.loan = self.make_txn(self.carol, self.alice, "30.00",
+                                  description="loan repayment")
+
+    def url(self):
+        return reverse("account:dashboard")
+
+    def history(self, **params):
+        """The dashboard response for ``params``, asserting it rendered."""
+        resp = self.client.get(self.url(), params)
+        self.assertEqual(resp.status_code, 200)
+        return resp.context["transaction_history"]
+
+    def pks(self, history):
+        return [t.pk for t in history["items"]]
+
+    def test_search_matches_description(self):
+        history = self.history(q="rent")
+        self.assertEqual(self.pks(history), [self.rent.pk])
+        self.assertEqual(history["total"], 1)
+
+    def test_search_matches_transaction_id(self):
+        fragment = self.grocery.transaction_id[:10]
+        history = self.history(q=fragment)
+        self.assertIn(self.grocery.pk, self.pks(history))
+        self.assertEqual(history["total"], 1)
+
+    def test_search_matches_counterparty_username(self):
+        # carol is the *sender* of the loan, so this can only match the party
+        # columns, not the description.
+        history = self.history(q="carol")
+        self.assertEqual(self.pks(history), [self.loan.pk])
+
+        # bob is the reciever of both alice transfers.
+        history = self.history(q="bob")
+        self.assertEqual(sorted(self.pks(history)),
+                         sorted([self.rent.pk, self.grocery.pk]))
+
+    def test_search_is_case_insensitive(self):
+        lower = self.history(q="rent")
+        upper = self.history(q="RENT")
+        self.assertEqual(self.pks(lower), self.pks(upper))
+        self.assertEqual(self.pks(lower), [self.rent.pk])
+
+    def test_search_blank_returns_all(self):
+        everything = self.history()
+        self.assertEqual(everything["total"], 3)
+
+        for blank in ("", "   "):
+            with self.subTest(q=repr(blank)):
+                resp = self.client.get(self.url(), {"q": blank})
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(
+                    resp.context["transaction_history"]["total"],
+                    everything["total"],
+                    "a blank q must not filter",
+                )
+                self.assertEqual(resp.context["history_q"], "")
+
+    def test_search_preserves_other_filters(self):
+        resp = self.client.get(self.url(),
+                               {"q": "rent", "period": "7d", "txn_type": "transfer"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["active_period"], "7d")
+        self.assertEqual(resp.context["active_type"], "transfer")
+        self.assertEqual(resp.context["history_q"], "rent")
+
+        # The page-level ?txn_type= deliberately does not scope the table: the
+        # history has its own ?type= filter (see dashboard()'s docstring), so the
+        # search is the only thing narrowing it here -- and the row it keeps is
+        # a transfer, which is what the page filter asked for anyway.
+        history = resp.context["transaction_history"]
+        self.assertEqual(self.pks(history), [self.rent.pk])
+        self.assertEqual(history["items"][0].transaction_type, "transfer")
+
+        # That own filter still applies alongside the search: the rent row is a
+        # transfer, so asking for requests leaves nothing.
+        narrowed = self.history(q="rent", type="request")
+        self.assertEqual(narrowed["items"], [])
+        self.assertEqual(narrowed["total"], 0)
+
+
+# =====================================================================
+# Phase E-1  budget categories
+# =====================================================================
+class CategoryTests(TestCase):
+    """The six defaults, and the (user, slug) rule that keeps them unique."""
+
+    DEFAULT_SLUGS = {
+        "groceries", "housing", "transport", "entertainment", "utilities", "other",
+    }
+
+    def make_user(self, name):
+        return User.objects.create_user(
+            username=name, email="%s@test.invalid" % name, password=PASSWORD
+        )
+
+    def test_new_user_gets_six_default_categories(self):
+        user = self.make_user("fresh")
+        cats = Category.objects.filter(user=user)
+        self.assertEqual(cats.count(), 6)
+        self.assertEqual(set(cats.values_list("slug", flat=True)), self.DEFAULT_SLUGS)
+
+    def test_unique_constraint_per_user(self):
+        user = self.make_user("dupe")
+        with self.assertRaises(IntegrityError):
+            # atomic() so the failed INSERT does not poison the test transaction.
+            with transaction.atomic():
+                Category.objects.create(user=user, name="Groceries II", slug="groceries")
+
+    def test_different_users_can_have_same_slug(self):
+        alice = self.make_user("alice")
+        bob = self.make_user("bob")
+        self.assertTrue(Category.objects.filter(user=alice, slug="groceries").exists())
+        self.assertTrue(Category.objects.filter(user=bob, slug="groceries").exists())
+
+    def test_category_str(self):
+        user = self.make_user("named")
+        category = Category.objects.get(user=user, slug="utilities")
+        self.assertTrue(str(category).startswith(user.username))
+        self.assertIn(category.name, str(category))
+        self.assertEqual(str(category), "%s / %s" % (user.username, category.name))
+
+    def test_category_cascade_on_user_delete(self):
+        user = self.make_user("gone")
+        user_id = user.pk
+        self.assertEqual(Category.objects.filter(user_id=user_id).count(), 6)
+
+        user.delete()
+        self.assertEqual(Category.objects.filter(user_id=user_id).count(), 0)
+
+    def test_category_ordering_by_name(self):
+        user = self.make_user("ordered")
+        # The six defaults would sort alongside these, so remove them first.
+        Category.objects.filter(user=user).delete()
+        for index, name in enumerate(["Charlie", "Alpha", "Bravo"]):
+            Category.objects.create(user=user, name=name, slug="custom-%d" % index)
+
+        self.assertEqual(
+            [c.name for c in Category.objects.filter(user=user)],
+            ["Alpha", "Bravo", "Charlie"],
+        )
+
+
+# =====================================================================
+# Phase E-2a  the /account/categories/ page
+# =====================================================================
+class CategoryViewTests(DashboardAnalyticsTestBase):
+    """List, add, and remove categories through the real views.
+
+    Login-only, like recipients and support: a category list is the user's own
+    bookkeeping, so the KYC gate does not apply.
+    """
+
+    def url(self):
+        return reverse("account:categories")
+
+    def add(self, name, icon="dots", color="gray"):
+        return self.client.post(self.url(),
+                                {"name": name, "icon": icon, "color": color})
+
+    def test_categories_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_categories_renders_six_defaults(self):
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.context["categories"]), 6)
+        self.assertContains(resp, "Add a category")
+        self.assertContains(resp, "Your categories")
+
+    def test_categories_create_success(self):
+        resp = self.add("Restaurants", icon="ticket", color="orange")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+
+        category = Category.objects.get(user=self.alice, slug="restaurants")
+        self.assertEqual(category.name, "Restaurants")
+        self.assertEqual(category.icon, "ticket")
+        self.assertEqual(category.color, "orange")
+
+    def test_categories_create_slug_derived(self):
+        self.assertEqual(self.add("My New Category").status_code, 302)
+        self.assertTrue(
+            Category.objects.filter(user=self.alice, slug="my-new-category").exists()
+        )
+
+    def test_categories_create_duplicate_rejected(self):
+        before = Category.objects.filter(user=self.alice).count()
+        resp = self.add("Groceries")  # slug "groceries" already exists
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "You already have a category with this name.")
+        self.assertEqual(Category.objects.filter(user=self.alice).count(), before)
+
+    def test_categories_delete_requires_post(self):
+        category = Category.objects.filter(user=self.alice).first()
+        resp = self.client.get(
+            reverse("account:category_delete", args=[category.pk])
+        )
+        self.assertEqual(resp.status_code, 405)
+
+    def test_categories_delete_own(self):
+        category = Category.objects.filter(user=self.alice, slug="groceries").get()
+        resp = self.client.post(
+            reverse("account:category_delete", args=[category.pk])
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+        self.assertFalse(Category.objects.filter(pk=category.pk).exists())
+
+    def test_categories_delete_other_user_rejected(self):
+        theirs = Category.objects.filter(user=self.bob, slug="groceries").get()
+        resp = self.client.post(
+            reverse("account:category_delete", args=[theirs.pk]), follow=True
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Category not found.")
+        self.assertTrue(Category.objects.filter(pk=theirs.pk).exists())
+
+    def test_categories_delete_detaches_transactions(self):
+        category = Category.objects.filter(user=self.alice, slug="housing").get()
+        txn = self.make_txn(self.alice, self.bob, "42.00", description="rent")
+        txn.category = category
+        txn.save()
+
+        resp = self.client.post(
+            reverse("account:category_delete", args=[category.pk]), follow=True
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "moved to Uncategorized")
+
+        txn.refresh_from_db()
+        self.assertIsNone(txn.category_id)
+        self.assertTrue(Transaction.objects.filter(pk=txn.pk).exists())
+
+    def test_categories_sidebar_link_active(self):
+        body = self.client.get(self.url()).content.decode()
+
+        active = re.findall(r"<li class=\"nav-item\">(.*?)</li>", body, re.S)
+        active = [block for block in active if "nav-link active" in block]
+        self.assertEqual(len(active), 1, "exactly one sidebar item is active")
+        self.assertIn("account/categories/", active[0])
+        self.assertIn("Categories", active[0])
+
+
+# =====================================================================
+# Phase E-2b  spend by category
+# =====================================================================
+class SpendByCategoryTests(DashboardAnalyticsTestBase):
+    """``get_spend_by_category`` and the dashboard context that feeds the doughnut.
+
+    "Spending" is money *out* of alice's account: a transfer she sent, or a
+    request she received (the direction rule the rest of the module uses).
+    """
+
+    def category(self, slug):
+        # The post_save receiver gave alice the six defaults.
+        return Category.objects.get(user=self.alice, slug=slug)
+
+    def spent(self, sender, reciever, amount, ttype="transfer", status="completed",
+              category=None, when=None):
+        txn = self.make_txn(sender, reciever, amount, status=status, ttype=ttype,
+                            when=when)
+        if category is not None:
+            txn.category = category
+            txn.save()
+        return txn
+
+    def test_spend_empty_for_fresh_user(self):
+        fresh, _ = self.make_user("fresh", "0.00", kyc=False)
+        spend = analytics.get_spend_by_category(fresh)
+        self.assertEqual(spend["total"], Decimal("0.00"))
+        self.assertEqual(spend["slices"], [])
+
+    def test_spend_groups_by_category(self):
+        self.spent(self.alice, self.bob, "30.00", category=self.category("groceries"))
+        self.spent(self.alice, self.bob, "20.00", category=self.category("transport"))
+
+        spend = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(spend["total"], Decimal("50.00"))
+        self.assertEqual([s["name"] for s in spend["slices"]],
+                         ["Groceries", "Transport"])
+        self.assertEqual([s["amount"] for s in spend["slices"]],
+                         [Decimal("30.00"), Decimal("20.00")])
+        self.assertEqual([s["slug"] for s in spend["slices"]],
+                         ["groceries", "transport"])
+        self.assertEqual([s["color"] for s in spend["slices"]], ["blue", "green"])
+        self.assertEqual([s["percent"] for s in spend["slices"]], [60.0, 40.0])
+
+    def test_spend_uncategorized_slice(self):
+        self.spent(self.alice, self.bob, "10.00")  # no category
+
+        spend = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(spend["total"], Decimal("10.00"))
+        self.assertEqual(len(spend["slices"]), 1)
+        slice_ = spend["slices"][0]
+        self.assertEqual(slice_["name"], "Uncategorized")
+        self.assertEqual(slice_["slug"], "")
+        self.assertEqual(slice_["color"], "gray")
+        self.assertEqual(slice_["percent"], 100.0)
+
+    def test_spend_ignores_incoming(self):
+        # bob -> alice: alice is the reciever of a transfer, so it is income.
+        self.spent(self.bob, self.alice, "99.00")
+
+        spend = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(spend["total"], Decimal("0.00"))
+        self.assertEqual(spend["slices"], [])
+
+    def test_spend_ignores_unsettled(self):
+        self.spent(self.alice, self.bob, "40.00", status="processing")
+        self.spent(self.alice, self.bob, "5.00", status="request_processing")
+
+        spend = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(spend["total"], Decimal("0.00"))
+        self.assertEqual(spend["slices"], [])
+
+    def test_spend_respects_days_window(self):
+        self.spent(self.alice, self.bob, "70.00",
+                   when=timezone.now() - timedelta(days=40))
+        self.spent(self.alice, self.bob, "12.00",
+                   when=timezone.now() - timedelta(days=5))
+
+        recent = analytics.get_spend_by_category(self.alice, days=30)
+        self.assertEqual(recent["total"], Decimal("12.00"))
+
+        everything = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(everything["total"], Decimal("82.00"))
+
+    def test_spend_respects_transaction_type(self):
+        self.spent(self.alice, self.bob, "10.00", ttype="transfer")
+        # A request alice is the reciever of is also money out for her.
+        self.spent(self.bob, self.alice, "25.00", ttype="request")
+
+        both = analytics.get_spend_by_category(self.alice)
+        self.assertEqual(both["total"], Decimal("35.00"))
+
+        transfers = analytics.get_spend_by_category(self.alice,
+                                                    transaction_type="transfer")
+        self.assertEqual(transfers["total"], Decimal("10.00"))
+
+        requests = analytics.get_spend_by_category(self.alice,
+                                                   transaction_type="request")
+        self.assertEqual(requests["total"], Decimal("25.00"))
+
+    def test_dashboard_context_has_spend_by_category(self):
+        self.spent(self.alice, self.bob, "8.00", category=self.category("utilities"))
+
+        resp = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(resp.status_code, 200)
+
+        spend = resp.context["spend_by_category"]
+        self.assertEqual(set(spend), {"total", "slices"})
+        self.assertEqual(spend["total"], Decimal("8.00"))
+        self.assertEqual([s["name"] for s in spend["slices"]], ["Utilities"])
+
+
+# =====================================================================
+# Phase F-1  the SavingsGoal model
+# =====================================================================
+class SavingsGoalModelTests(TestCase):
+    """The model and its three derived properties: progress_percent,
+    remaining and is_overdue.
+
+    SavingsGoal is a manual tracking tool. It moves no money and is not
+    wired into the transfer flow, so these tests only exercise the model
+    layer -- nothing here touches TransferProcess or an Account balance.
+    """
+
+    def make_user(self, name="saver"):
+        return User.objects.create_user(
+            username=name, email="%s@test.invalid" % name, password=PASSWORD
+        )
+
+    def make_goal(self, user=None, **kwargs):
+        user = user or self.make_user()
+        defaults = {"name": "New laptop", "target_amount": Decimal("1000.00")}
+        defaults.update(kwargs)
+        return SavingsGoal.objects.create(user=user, **defaults)
+
+    def test_goal_can_be_created(self):
+        user = self.make_user("creator")
+        goal = self.make_goal(user=user)
+
+        stored = SavingsGoal.objects.get(pk=goal.pk)
+        self.assertEqual(stored.user, user)
+        self.assertEqual(stored.current_amount, Decimal("0.00"))
+        self.assertFalse(stored.is_completed)
+
+    def test_goal_str(self):
+        user = self.make_user("strcheck")
+        goal = self.make_goal(user=user, name="Holiday fund")
+
+        text = str(goal)
+        self.assertIn(user.username, text)
+        self.assertIn("Holiday fund", text)
+        self.assertEqual(text, "%s / %s" % (user.username, "Holiday fund"))
+
+    def test_progress_percent_zero_when_empty(self):
+        goal = self.make_goal(current_amount=Decimal("0.00"))
+        self.assertEqual(goal.progress_percent, 0)
+
+    def test_progress_percent_partial(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("250.00")
+        )
+        self.assertEqual(goal.progress_percent, 25)
+
+    def test_progress_percent_capped_at_100(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("1500.00")
+        )
+        self.assertEqual(goal.progress_percent, 100)
+
+    def test_progress_percent_zero_when_target_zero(self):
+        # A zero target must not raise ZeroDivisionError.
+        goal = self.make_goal(
+            target_amount=Decimal("0.00"), current_amount=Decimal("50.00")
+        )
+        self.assertEqual(goal.progress_percent, 0)
+
+    def test_remaining_math(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("250.00")
+        )
+        self.assertEqual(goal.remaining, Decimal("750.00"))
+
+    def test_remaining_zero_when_met(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("1000.00")
+        )
+        self.assertEqual(goal.remaining, Decimal("0.00"))
+
+    def test_remaining_zero_when_over(self):
+        goal = self.make_goal(
+            target_amount=Decimal("1000.00"), current_amount=Decimal("1200.00")
+        )
+        self.assertEqual(goal.remaining, Decimal("0.00"))
+
+    def test_is_overdue_true(self):
+        goal = self.make_goal(
+            deadline=timezone.localdate() - timedelta(days=1),
+            is_completed=False,
+        )
+        self.assertTrue(goal.is_overdue)
+
+    def test_is_overdue_false_when_completed(self):
+        goal = self.make_goal(
+            deadline=timezone.localdate() - timedelta(days=1),
+            is_completed=True,
+        )
+        self.assertFalse(goal.is_overdue)
+
+    def test_is_overdue_false_when_no_deadline(self):
+        goal = self.make_goal(deadline=None)
+        self.assertFalse(goal.is_overdue)
+
+
+# =====================================================================
+# Phase F-2  the savings-goals page and the dashboard widget
+# =====================================================================
+class SavingsGoalViewTests(DashboardAnalyticsTestBase):
+    """``account:goals`` and its three POST-only actions, plus the dashboard
+    widget.
+
+    alice is signed in by the base class and has KYC, so the dashboard
+    renders for her; bob exists so the cross-user scoping is exercised
+    against a real second user rather than an invented pk. Every test
+    builds its own goal -- the base class seeds accounts, not goals.
+    """
+
+    def url(self):
+        return reverse("account:goals")
+
+    def make_goal(self, user=None, name="Trip", target="1000.00", **kwargs):
+        return SavingsGoal.objects.create(
+            user=user or self.alice,
+            name=name,
+            target_amount=Decimal(target),
+            **kwargs
+        )
+
+    def add(self, goal, amount):
+        return self.client.post(
+            reverse("account:goal_add", args=[goal.pk]), {"amount": amount}
+        )
+
+    # ------------------------------------------------------------ access
+
+    def test_goals_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("/user/sign-in/", resp["Location"])
+
+    def test_goals_renders_empty(self):
+        resp = self.client.get(self.url())
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Create a goal")
+        self.assertContains(resp, "Active goals")
+        self.assertContains(resp, "No active goals")
+
+    # ------------------------------------------------------------ create
+
+    def test_goal_create(self):
+        resp = self.client.post(
+            self.url(), {"name": "Trip", "target_amount": "1000"}
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+
+        goal = SavingsGoal.objects.get(user=self.alice)
+        self.assertEqual(goal.name, "Trip")
+        self.assertEqual(goal.target_amount, Decimal("1000.00"))
+        self.assertEqual(goal.current_amount, Decimal("0.00"))
+        self.assertFalse(goal.is_completed)
+
+    def test_goal_create_rejects_zero_target(self):
+        resp = self.client.post(
+            self.url(), {"name": "Trip", "target_amount": "0"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Target must be greater than zero.")
+        self.assertEqual(SavingsGoal.objects.filter(user=self.alice).count(), 0)
+
+    # ------------------------------------------------------- contributions
+
+    def test_goal_add_increases_current(self):
+        goal = self.make_goal(target="1000.00")
+
+        resp = self.add(goal, "100")
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+
+        goal.refresh_from_db()
+        self.assertEqual(goal.current_amount, Decimal("100.00"))
+        self.assertFalse(goal.is_completed)
+
+    def test_goal_add_auto_completes_on_reach(self):
+        goal = self.make_goal(target="100.00")
+
+        self.assertEqual(self.add(goal, "100").status_code, 302)
+
+        goal.refresh_from_db()
+        self.assertTrue(goal.is_completed)
+
+        # On the next GET it has left the active list and sits under
+        # "Completed goals". The slice starts after the "Active goals"
+        # heading, because the success message above the cards also names
+        # the goal.
+        body = self.client.get(self.url()).content.decode()
+        active_part, _, completed_part = (
+            body.split("Active goals", 1)[1].partition("Completed goals")
+        )
+        self.assertTrue(completed_part, "the completed card did not render")
+        self.assertIn("No active goals", active_part)
+        self.assertNotIn("Trip", active_part)
+        self.assertIn("Trip", completed_part)
+
+    def test_goal_add_rejects_zero(self):
+        goal = self.make_goal(target="1000.00")
+
+        resp = self.client.post(
+            reverse("account:goal_add", args=[goal.pk]),
+            {"amount": "0"},
+            follow=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Please enter a valid amount.")
+
+        goal.refresh_from_db()
+        self.assertEqual(goal.current_amount, Decimal("0.00"))
+
+    # ----------------------------------------------------- complete/delete
+
+    def test_goal_complete_toggles(self):
+        goal = self.make_goal()
+        pk_url = reverse("account:goal_complete", args=[goal.pk])
+
+        self.assertEqual(self.client.post(pk_url).status_code, 302)
+        goal.refresh_from_db()
+        self.assertTrue(goal.is_completed)
+
+        self.assertEqual(self.client.post(pk_url).status_code, 302)
+        goal.refresh_from_db()
+        self.assertFalse(goal.is_completed)
+
+    def test_goal_delete(self):
+        goal = self.make_goal()
+
+        resp = self.client.post(reverse("account:goal_delete", args=[goal.pk]))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], self.url())
+        self.assertFalse(SavingsGoal.objects.filter(pk=goal.pk).exists())
+
+    def test_goal_delete_other_user_rejected(self):
+        theirs = self.make_goal(user=self.bob, name="Bob's goal")
+
+        resp = self.client.post(
+            reverse("account:goal_delete", args=[theirs.pk]), follow=True
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Goal not found.")
+        self.assertTrue(SavingsGoal.objects.filter(pk=theirs.pk).exists())
+
+    def test_goal_views_require_post(self):
+        goal = self.make_goal()
+        for name in ("goal_add", "goal_complete", "goal_delete"):
+            resp = self.client.get(reverse("account:%s" % name, args=[goal.pk]))
+            self.assertEqual(resp.status_code, 405, name)
+        goal.refresh_from_db()
+        self.assertFalse(goal.is_completed)
+
+    # ---------------------------------------------------------- dashboard
+
+    def test_dashboard_shows_goals_widget(self):
+        # created_at is auto_now_add, so only an UPDATE can order these. The
+        # widget takes the two newest, which must therefore be "Widget Two"
+        # and "Widget Three", in that order.
+        older = self.make_goal(name="Widget One")
+        middle = self.make_goal(name="Widget Two")
+        newest = self.make_goal(name="Widget Three")
+        now = timezone.now()
+        SavingsGoal.objects.filter(pk=older.pk).update(
+            created_at=now - timedelta(days=2)
+        )
+        SavingsGoal.objects.filter(pk=middle.pk).update(
+            created_at=now - timedelta(days=1)
+        )
+        SavingsGoal.objects.filter(pk=newest.pk).update(created_at=now)
+
+        resp = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Savings goals")
+        self.assertContains(resp, "Manage goals")
+        self.assertContains(resp, "Widget Two")
+        self.assertContains(resp, "Widget Three")
+        self.assertNotContains(resp, "Widget One")
+
+        body = resp.content.decode()
+        self.assertLess(body.index("Widget Three"), body.index("Widget Two"))
+
+        # No goals at all: the card is not rendered, heading included.
+        SavingsGoal.objects.filter(user=self.alice).delete()
+        resp = self.client.get(reverse("account:dashboard"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, "Savings goals")
+        self.assertNotContains(resp, "Manage goals")

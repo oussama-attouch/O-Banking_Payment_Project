@@ -56,6 +56,7 @@ from account.models import (
     IDENTITY_TYPE,
     MARRTIAL_STATUS,
     Account,
+    Category,
     KYC,
 )
 from core.models import Transaction
@@ -79,6 +80,10 @@ DORMANT_COUNT = 30
 HUB_TRAFFIC_SHARE = 0.30
 KYC_RATIO = 0.80
 KYC_CONFIRMED_RATIO = 0.90
+
+#: Fraction of transactions that get a budget category (Phase E-1). The rest stay
+#: NULL on purpose, so the E-2 breakdown has an "Uncategorized" slice to show.
+CATEGORY_SHARE = 0.60
 
 #: Type/status mix per 100 rows: 75 settled transfers, 15 settled requests,
 #: 10 still in flight (6 transfers mid-flight, 4 requests awaiting settlement --
@@ -601,7 +606,18 @@ class Command(BaseCommand):
         """
         objs = []
         when_by_tid = {}
+
+        # Categories are per user, so resolve every sender's set once for the
+        # whole batch instead of querying inside the loop (Phase E-1).
+        sender_ids = {row["sender"].pk for row in rows}
+        categories_by_user = {}
+        for user_id, category_pk in (Category.objects
+                                     .filter(user_id__in=sender_ids)
+                                     .values_list("user_id", "pk")):
+            categories_by_user.setdefault(user_id, []).append(category_pk)
+
         for row in rows:
+            category_pks = categories_by_user.get(row["sender"].pk) or []
             txn = Transaction(
                 user_id=row["sender"].pk,
                 sender_id=row["sender"].pk,
@@ -612,6 +628,9 @@ class Command(BaseCommand):
                 status=row["status"],
                 transaction_type=row["ttype"],
                 description=DEMO_DESCRIPTION,
+                category_id=(random.choice(category_pks)
+                             if category_pks and random.random() < CATEGORY_SHARE
+                             else None),
             )
             objs.append(txn)
             when_by_tid[txn.transaction_id] = row["when"]

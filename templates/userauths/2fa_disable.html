@@ -1,0 +1,37 @@
+{% extends "partials/dashboard-base.html" %}
+{% block title %}Disable 2FA · O-Banking{% endblock %}
+{% block content %}
+<div class="container-xl py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-6">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title text-danger">
+            <i class="ti ti-shield-off me-1"></i> Disable two-factor authentication
+          </h2>
+        </div>
+        <div class="card-body">
+          <p class="text-secondary">
+            Disabling 2FA makes your account less secure. Confirm with
+            your password to continue.
+          </p>
+          <form method="post" action="{% url 'userauths:two_factor_disable_confirm' %}">
+            {% csrf_token %}
+            <div class="mb-3">
+              <label class="form-label" for="password">Account password</label>
+              <input type="password" name="password" id="password"
+                     class="form-control" autocomplete="current-password" autofocus>
+              {% if error %}
+                <div class="text-danger small mt-1">{{ error }}</div>
+              {% endif %}
+            </div>
+            <button type="submit" class="btn btn-danger">Disable 2FA</button>
+            <a href="{% url 'account:settings' %}"
+               class="btn btn-outline-secondary ms-2">Cancel</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

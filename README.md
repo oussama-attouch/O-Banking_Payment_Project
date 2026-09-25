@@ -2,7 +2,7 @@
 
 A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively-licensed UI.
 
-`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `186 tests passing`
+`Django 5.2 LTS` · `Python 3.12` · `SQLite` · `Tabler 1.5.1` · `Chart.js 4.4.4` · `MIT` · `294 tests passing`
 
 ## Table of contents
 
@@ -39,7 +39,7 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 ## Solution Overview
 
-**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 186 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
+**Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 294 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
 **Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports: Django, django-jazzmin, django-import-export, shortuuid, and Pillow.
 
@@ -100,9 +100,15 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 - Period and type filter bar that recomputes every KPI and every chart from one row of links
 - KPI sparklines, delta chips, and dark mode
 - Statements with a range selector (this month, last 3 months, this year, last 12 months) and CSV export
+- Custom spending categories with a dashboard spend-by-category doughnut chart and a top-categories list
+- Savings goals with progress tracking and a dashboard widget
+- Full-text search across description, transaction id, and counterparty
 - Saved recipients for one-click transfers
 - Notification center: a bell in the topbar with an unread badge, a 5-item dropdown, and a paginated list
 - Immutable audit log: append-only `LogEntry` for sensitive actions, with a read-only admin
+- Rate limiting on login, transfer, settlement, and payment-request confirmation
+- Per-user daily / weekly / monthly transfer limits, editable from the admin
+- Optional TOTP two-factor authentication with single-use recovery codes and a session-parked challenge step
 - Support tickets: inline create, thread view, and staff replies from the admin
 - User settings: profile editing and password change
 - Public blog (list, detail, category filter) and a contact form
@@ -167,9 +173,35 @@ One notification is created per state transition, by comparing the status captur
 
 The write path is a single helper, `audit.utils.log()`, which never raises: a logging failure cannot take down the request that triggered it. `AuditContextMiddleware` stores the current request in a thread-local so the helper can resolve the actor, IP, and user-agent from any view without threading the request through every call site.
 
+### k) Rate limiting is a fixed window, not a lockout
+
+Login is limited to 5 attempts per email per 15 minutes; transfer, settlement, and payment-request confirmation to 10 attempts per user per hour. The window is fixed at the first attempt (`cache.add` sets the timeout; `cache.incr` never resets it), so a burst of failures does not extend the lockout indefinitely. Only POSTs consume the quota, and a successful login clears the counter for that email. The limiter uses Django's default LocMemCache and is therefore per-process — correct for a single-worker dev server, listed in Future Work as needing a shared cache in production.
+
+### l) The TOTP secret is not encrypted at rest
+
+`TOTPDevice.secret` is stored as a plaintext base32 string. That is a deliberate limitation for a demo project; production would use a KMS-backed encrypted field. The reasoning is recorded in `userauths/totp.py` and listed in Future Work. Recovery codes are stored as Django password hashes, so a database leak does not expose a working code.
+
+### m) The 2FA challenge parks the pending user in the session
+
+A correct password alone does not authenticate the session when the user has a confirmed TOTP device. `LoginView` sets `session["2fa_pending_user_id"]` and `session["2fa_pending_at"]` and redirects to the challenge view; `login()` is called only after a valid TOTP code or an unused recovery code. The pending state expires after five minutes. This is the security property the feature exists to guarantee: an attacker who has the password but not the second factor is left anonymous.
+
+### n) Spend is derived, not stored
+
+The spend-by-category chart is computed from `Transaction` rows at render time, not stored in a running total. That means a category deletion or an amount edit retroactively updates the chart — the fact that `Transaction.category` uses `SET_NULL` makes the deleted-category slice appear as "Uncategorized" without a data migration. The chart is a projection of the ledger, not a second source of truth.
+
+### o) Savings goals are a tracking tool, not a transfer
+
+The `SavingsGoal` model does not interact with the transfer flow. A "contribute" button that moved money would need a second money-movement path — with its own balance locking, self-transfer guard, URL/account mismatch check, and rate limiter — next to the one that has been frozen since Phase 1.8. Instead, the user records their own progress. This keeps the money path single.
+
+### p) The transfer limit is checked inside the atomic block
+
+The limit is enforced inside the same `transaction.atomic()` and `select_for_update()` block that guards the balance mutation. Checking outside would allow a race: two concurrent confirmations could each see an under-limit total and both proceed. The check adds five bounded queries to every confirmation, which extends the row-lock window slightly — acceptable at demo scale, cacheable at production scale.
+
+It counts only settled money (`completed`, `request_settled`). The row being confirmed is still `processing` at that moment, so counting in-flight rows would measure each transfer against itself — a 100.00 transfer against a 100.00 limit would be refused as 200.00.
+
 ## Results
 
-- 186 tests, from 0 (three stubs, four lines)
+- 294 tests, from 0 (three stubs, four lines)
 - `static/` 13.99 MB → 2.38 MB (−83%, 206 files → 11)
 - 7 critical bugs from the original audit closed
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect
@@ -258,6 +290,9 @@ The audit and modernization ran as a numbered phase sequence — from the securi
 - An admin workflow for confirming KYC (`kyc_confirmed` is written only through the admin list view)
 - Replace the seeder's per-row date update with a bulk raw SQL update for 10× scale
 - Replace `"test" in sys.argv` with a dedicated settings module for stricter test-runner detection
+- A shared cache backend (Redis) for the rate limiter so the quota is enforced across multiple worker processes
+- Encrypt `TOTPDevice.secret` at rest with a KMS-managed key
+- Server-side TOTP replay prevention (cache the last accepted time-step per device so a code cannot be reused within its 30-second window)
 
 ## Author
 

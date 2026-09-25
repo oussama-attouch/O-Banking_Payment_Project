@@ -6,9 +6,15 @@ from django.db.models import Q  # Import the Q object for complex queries
 from django.contrib import messages  # Import messages module for user notifications
 from core.models import Transaction  # Import the Transaction model from the 'core' app
 from decimal import Decimal  # Import the Decimal class for precise decimal arithmetic
-from core.security import AmountError, find_party_transaction, parse_amount
+from core.security import (
+    AmountError,
+    check_transfer_limit,
+    find_party_transaction,
+    parse_amount,
+)
 from django.views.decorators.http import require_POST
 from audit.utils import log as audit_log
+from core.ratelimit import rate_limit, user_key
 
 # Require authentication for this view using the @login_required decorator
 @login_required
@@ -113,6 +119,7 @@ def AmountRequestConfirmation(request,account_number,transaction_id):
     return render(request,"payment_request/amount-request-confirmation.html",context)
 
 
+@rate_limit(user_key("amount_request"), limit=10, window=3600, label="amount_request")
 @login_required
 def AmountRequestFinalProcess(request, account_number,transaction_id):
     # Scoped to the requesting user's own transactions (see core.security).
@@ -188,6 +195,7 @@ def Settlement_confirmation(request,account_number,transaction_id):
         }
     return render(request,"payment_request/settlement-confirmation.html",context)
 
+@rate_limit(user_key("settlement"), limit=10, window=3600, label="settlement")
 @login_required
 def Settlement_processing(request,account_number,transaction_id):
     # Scoped to the requesting user's own transactions (see core.security).
@@ -219,6 +227,8 @@ def Settlement_processing(request,account_number,transaction_id):
             insufficient = False
             already_processed = False
             mismatch = False
+            limit_exceeded = False
+            limit_details = None
             with db_transaction.atomic():
                 # Lock both account rows in a deterministic (primary key) order
                 # so two concurrent settlements in opposite directions cannot
@@ -243,6 +253,18 @@ def Settlement_processing(request,account_number,transaction_id):
                     .first()
                 )
 
+                # Phase G-2: the PAYER's per-user transfer limit. request.user
+                # is the payer here -- stored as ``reciever``, which is the role
+                # the direction rule counts as outgoing money. Evaluated once,
+                # here, so the chain below only reads _ok / _det; its flag is
+                # tested AFTER the mismatch and status guards and BEFORE the
+                # balance guard. Guarded on locked_txn: a row that vanished
+                # between the fetch above and this lock is None, and that case
+                # is already answered by the first branch below.
+                _ok, _det = True, {}
+                if locked_txn is not None:
+                    _ok, _det = check_transfer_limit(request.user, locked_txn.amount)
+
                 # Phase 1.8: URL/transaction mismatch guard.
                 # A settlement is paid by the stored reciever and credited to
                 # the stored sender (the requester), so the URL must name the
@@ -259,6 +281,11 @@ def Settlement_processing(request,account_number,transaction_id):
                     mismatch = True
                 elif locked_txn.status != "request_sent":
                     already_processed = True
+                elif not _ok:
+                    # Phase G-2: refused before the balance guard below, so a
+                    # limit rejection never reads as an affordability problem.
+                    limit_exceeded = True
+                    limit_details = _det
                 # Re-checked against the LOCKED row, so the check and the debit
                 # cannot be raced by a concurrent balance change.
                 elif sender_row.account_balance <= 0 or sender_row.account_balance < locked_txn.amount:
@@ -277,6 +304,28 @@ def Settlement_processing(request,account_number,transaction_id):
             if mismatch:
                 messages.warning(request, "This transaction does not match the account in the link.")
                 return redirect("core:transactions")
+
+            if limit_exceeded:
+                period = (limit_details or {}).get("period") or "period"
+                used = (limit_details or {}).get("used")
+                limit = (limit_details or {}).get("limit")
+                audit_log("rate_limited", target=locked_txn, metadata={
+                    "kind": "transfer_limit",
+                    "period": period,
+                    "used": str(used) if used is not None else None,
+                    "limit": str(limit) if limit is not None else None,
+                    "amount": str(locked_txn.amount),
+                })
+                messages.warning(
+                    request,
+                    f"This settlement would exceed your {period} limit. "
+                    f"You have used {used} of {limit}.",
+                )
+                return redirect(
+                    "core:settlement-confirmation",
+                    account.account_number,
+                    locked_txn.transaction_id,
+                )
 
             if already_processed:
                 messages.warning(request, "This settlement has already been processed.")
