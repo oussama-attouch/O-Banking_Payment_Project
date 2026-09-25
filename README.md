@@ -25,7 +25,7 @@ A Django 5.2 banking demo — audited, modernized, and rebuilt on a permissively
 
 ## Context
 
-O-Banking is a server-rendered Django monolith for a simulated bank. It covers registration and email login, KYC submission with document upload, transfers between accounts, payment requests and their settlement, a dashboard with KPIs and charts, statements with CSV export, saved recipients, a notification center, an in-app support ticket system, and a user settings page. Alongside the banking application sit a public blog and a contact page.
+O-Banking is a server-rendered Django monolith for a simulated bank. It covers registration and email login, KYC submission with document upload, transfers between accounts, payment requests and their settlement, a dashboard with KPIs and charts, statements with CSV export, saved recipients, a notification center, an in-app support ticket system, a user settings page, spending categories, savings goals, and per-user transfer limits. Alongside the banking application sit a public blog and a contact page.
 
 The project exists because of a final-year PFA. The codebase started as a 2022 Django 3.1 project that had never been audited: it was imported as received and then left alone. It was returned to in 2026 to fix its security problems, modernize the stack, and rebuild the interface on a theme that can legally ship.
 
@@ -41,23 +41,49 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 **Security audit.** Eleven phases, each landing with a test that first proved the defect and then proved the fix. The suite that grew out of that work is 294 Django `TestCase` tests covering money movement, authorization, the seeder, and every feature added since.
 
-**Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports: Django, django-jazzmin, django-import-export, shortuuid, and Pillow.
+**Stack upgrade.** Django 3.1 → 5.2 LTS and Python 3.9 → 3.12. The dependency list was cut to the five packages the code actually imports, then extended with two more when two-factor authentication was added: Django, django-jazzmin, django-import-export, shortuuid, Pillow, pyotp, and qrcode.
 
 **UI migration.** The original theme was replaced by Tabler 1.5.1 (MIT), vendored as prebuilt files so the application runs offline. `static/` went from 13.99 MB across 206 files to 2.38 MB across 11. A purple-accent design layer with dark mode lives in one stylesheet, `static/tabler/css/ob-theme.css`.
 
-**Demo data and features.** A `seed_demo` command generates 150 users and 3,000 transactions over 24 months, with balances replayed to match. Five feature areas were then built on top: statements with CSV export, saved recipients, a notification center, a support ticket system, and a user settings page.
+**Demo data and features.** A `seed_demo` command generates 150 users and 3,000 transactions over 24 months, with balances replayed to match. Feature areas built on top include statements with CSV export, saved recipients, a notification center, a support ticket system, and a user settings page. A second round of work (v2.2) added an immutable audit log, rate limiting on the four credential-checking endpoints, TOTP two-factor authentication, full-text transaction search, spending categories with a dashboard doughnut chart, savings goals, and daily / weekly / monthly transfer limits enforced inside the atomic money-path block.
 
 ## Screenshots
 
 ### Dashboard
 
+<!-- REPLACE: docs/screenshots/dashboard/dashboard-light.png — full dashboard in light mode, 5 charts, savings goals widget, spend-by-category doughnut -->
+
+<!-- REPLACE: docs/screenshots/dashboard/dashboard-dark.png — same page after clicking the theme toggle, dark palette -->
+
 | Light mode | Dark mode |
 | --- | --- |
 | ![Dashboard light mode](docs/screenshots/dashboard/dashboard-light.png) | ![Dashboard dark mode](docs/screenshots/dashboard/dashboard-dark.png) |
 
-8 KPIs, 4 charts, 2 summary tables, and a paginated transaction history. A single period-and-type filter bar (7 days / 30 days / 90 days / 1 year / All time · All types / Transfers / Requests) recomputes every KPI and every chart from the same query parameters.
+8 KPIs, 5 charts, 2 summary tables, and a paginated transaction history. A single period-and-type filter bar (7 days / 30 days / 90 days / 1 year / All time · All types / Transfers / Requests) recomputes every KPI and every chart from the same query parameters.
+
+### Security and account features
+
+<!-- REPLACE: docs/screenshots/security/2fa-setup.png — QR code + secret + 6-digit code form from /user/2fa/setup/ -->
+
+<!-- REPLACE: docs/screenshots/security/2fa-challenge.png — the challenge page shown after a correct password when a TOTP device is confirmed -->
+
+<!-- REPLACE: docs/screenshots/security/audit-log.png — /admin/audit/logentry/ changelist showing recent actions, filters, and no Add button -->
+
+| Two-factor enrolment | Two-factor challenge |
+| --- | --- |
+| ![2FA setup](docs/screenshots/security/2fa-setup.png) | ![2FA challenge](docs/screenshots/security/2fa-challenge.png) |
+
+| Audit log (admin) | Transfer limits (admin) |
+| --- | --- |
+| ![Audit log](docs/screenshots/security/audit-log.png) | ![Transfer limits](docs/screenshots/security/transfer-limits.png) |
+
+<!-- REPLACE: docs/screenshots/security/transfer-limits.png — /admin/core/transferlimit/ changelist showing the day/week/month rows for a user -->
 
 ### Banking
+
+<!-- REPLACE: docs/screenshots/banking/categories.png — /account/categories/ page with default categories and the add form -->
+
+<!-- REPLACE: docs/screenshots/banking/goals.png — /account/goals/ with an active goal, progress bar, and inline add form -->
 
 | Transactions | Account |
 | --- | --- |
@@ -66,6 +92,10 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 | Statements | Recipients |
 | --- | --- |
 | ![Statements](docs/screenshots/banking/statements.png) | ![Recipients](docs/screenshots/banking/recipients.png) |
+
+| Categories | Savings goals |
+| --- | --- |
+| ![Categories](docs/screenshots/banking/categories.png) | ![Savings goals](docs/screenshots/banking/goals.png) |
 
 ### Public
 
@@ -82,11 +112,13 @@ A server-rendered Django monolith. There is no separate API, no single-page appl
 | Area | Detail |
 | --- | --- |
 | Shells | `templates/partials/base.html` (public) and `templates/partials/dashboard-base.html` (authenticated). Their `:root` blocks are byte-identical, and a probe asserts they stay that way. |
-| Apps | `core` (money movement, landing), `userauths` (auth), `account` (accounts, KYC, recipients, notifications, support, settings), `pages` (blog and contact) |
+| Apps | `core` (money movement, landing, transfer limits), `userauths` (auth, 2FA devices and recovery codes), `account` (accounts, KYC, recipients, notifications, support, settings, categories, savings goals, statements, dashboard analytics), `pages` (blog and contact), `audit` (append-only log) |
 | Data | SQLite. `Account.account_balance` is the single source of truth: there is no ledger and no event-sourced table. |
 | Direction | transfer: sender → reciever. Settled request: reciever → sender (the requester is credited). |
 | Auth | Email is the login field (`USERNAME_FIELD = 'email'`); `username` is required but is not the credential. |
-| Charts | Chart.js 4.4.4, vendored. Four dashboard charts: line, doughnut, grouped bar, and a filled area chart. |
+| 2FA | Optional TOTP. When enabled, `LoginView` parks the pending user in the session and redirects to a challenge; `login()` is only called after the code or a recovery code verifies. |
+| Limits | Per-user daily / weekly / monthly caps on outgoing transfers, checked inside the same `atomic()` block that moves the money. |
+| Charts | Chart.js 4.4.4, vendored. Five dashboard charts: line, doughnut, grouped bar, area, and a spend-by-category doughnut. |
 
 Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own bundle.
 
@@ -94,23 +126,22 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 
 - User registration with email login
 - KYC submission with document upload
-- Transfers between accounts: password re-entry, atomic, `select_for_update`, URL/transaction mismatch guard
+- Transfers between accounts: password re-entry, atomic, `select_for_update`, URL/transaction mismatch guard, and per-user daily / weekly / monthly limits
 - Payment requests and settlements, with a separate settlement direction rule
-- Dashboard: 8 KPIs, 4 charts, 2 summary tables, and a filtered paginated history
+- Dashboard: 8 KPIs, 5 charts, 2 summary tables, and a filterable paginated history
 - Period and type filter bar that recomputes every KPI and every chart from one row of links
 - KPI sparklines, delta chips, and dark mode
 - Statements with a range selector (this month, last 3 months, this year, last 12 months) and CSV export
+- Full-text search across description, transaction id, and counterparty
 - Custom spending categories with a dashboard spend-by-category doughnut chart and a top-categories list
 - Savings goals with progress tracking and a dashboard widget
-- Full-text search across description, transaction id, and counterparty
 - Saved recipients for one-click transfers
 - Notification center: a bell in the topbar with an unread badge, a 5-item dropdown, and a paginated list
-- Immutable audit log: append-only `LogEntry` for sensitive actions, with a read-only admin
-- Rate limiting on login, transfer, settlement, and payment-request confirmation
-- Per-user daily / weekly / monthly transfer limits, editable from the admin
-- Optional TOTP two-factor authentication with single-use recovery codes and a session-parked challenge step
 - Support tickets: inline create, thread view, and staff replies from the admin
 - User settings: profile editing and password change
+- Optional TOTP two-factor authentication with single-use recovery codes and a session-parked challenge step
+- Immutable audit log of sensitive actions, read-only in the admin
+- Rate limiting on login, transfer, settlement, and payment-request confirmation
 - Public blog (list, detail, category filter) and a contact form
 - `seed_demo` management command for reproducible demo data
 - Django admin with Jazzmin and `ImportExportModelAdmin`
@@ -128,6 +159,8 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 | Import/export | django-import-export 4.4.1 | Backs the admin's `ImportExportModelAdmin` |
 | ID generation | shortuuid 1.0.13 | Compact, non-sequential account and transaction identifiers |
 | Images | Pillow 12.3.0 | Required by `ImageField` for KYC uploads |
+| 2FA | pyotp 2.9.0 | TOTP code generation and verification |
+| QR codes | qrcode[pil] 7.4.2 | Data-URL PNG for the 2FA enrolment screen |
 
 ## Engineering Decisions
 
@@ -207,15 +240,16 @@ It counts only settled money (`completed`, `request_settled`). The row being con
 - 5 further bugs surfaced during modernization: balance corruption, PIN written to stdout, replayable transfer, settlement KYC crash, and the URL-direction redirect
 - `seed_demo`: 150 users, 3,000 transactions, 24 months
 - Django 3.1 → 5.2 LTS, Python 3.9 → 3.12
-- Suite runtime brought to ~7 s by the test-runner hasher swap, from a run dominated by PBKDF2 at ~1.7 s per fixture user
+- Suite runtime brought to ~17 s by the test-runner hasher swap, from a run dominated by PBKDF2 at ~1.7 s per fixture user
+- 7 feature areas added in v2.2: audit log, rate limiting, 2FA, search, categories, savings goals, transfer limits
 
 ## Quick Start
 
 Prerequisites: Python 3.12 and Git.
 
 ```bash
-git clone https://github.com/oussama-attouch/O-Banking_Payment_Project.git
-cd O-Banking_Payment_Project
+git clone https://github.com/oussama-attouch/O-Banking_Payment_Project_V2.git
+cd O-Banking_Payment_Project_V2
 py -3.12 -m venv venv
 .\venv\Scripts\pip install -r requirements.txt
 $env:DJANGO_DEBUG=1
@@ -235,6 +269,8 @@ Demo user: user1@demo.local / DemoPass123!
 
 Users 1–120 have KYC records and transaction history; users 121–150 are dormant accounts with no activity.
 
+To try two-factor authentication: log in as the demo user, open **Settings**, click **Enable 2FA**, scan the QR code with an authenticator app, and confirm. The next login will ask for a code.
+
 ## Seed Instructions
 
 | Flag | Default | Meaning |
@@ -252,18 +288,22 @@ Idempotent. Refuses to run on a database that already contains seeded rows unles
 
 ```
 payment_prj/                 Django project: settings, root URLconf, WSGI/ASGI entry points
-core/                        Money movement (transfer, payment request, settlement), landing
-                             pages, shared security helpers, seed_demo command
-userauths/                   Custom user model with email login, auth views
+core/                        Money movement (transfer, payment request, settlement),
+                             transfer-limit model and check helper, landing pages,
+                             shared security helpers, seed_demo command
+userauths/                   Custom user model with email login, auth views,
+                             TOTP devices and recovery codes
 account/                     Accounts, KYC, recipients, notifications, support tickets,
-                             settings, statements, dashboard analytics
+                             settings, categories, savings goals, statements,
+                             dashboard analytics
 pages/                       Public blog and contact form
+audit/                       Append-only LogEntry, middleware, log() helper, read-only admin
 templates/                   All HTML; partials/ holds the two shells
 static/                      Vendored Tabler 1.5.1, Chart.js, and ob-theme.css
 docs/                        Screenshot provenance notes and the screenshot library
 venv/                        Virtual environment (gitignored)
 manage.py                    Django management entry point
-requirements.txt             The five runtime dependencies, pinned
+requirements.txt             The seven runtime dependencies, pinned
 db.sqlite3                   Development database (gitignored)
 media/                       User-uploaded KYC documents (gitignored)
 tabler--tabler-core-1.5.1/   Extracted upstream theme source, kept for reference
@@ -280,19 +320,21 @@ THIRD-PARTY.md               Third-party notices and licence provenance
 
 Third-party licences and asset provenance are recorded in [THIRD-PARTY.md](./THIRD-PARTY.md). The full screenshot library lives in [`docs/screenshots/`](docs/screenshots/) with provenance notes in [`docs/README.md`](docs/README.md).
 
-The audit and modernization ran as a numbered phase sequence — from the security fixes in Phase 1 through the dashboard filters in Phase 7c, with Phase 6 for the initial documentation. Each phase is a commit; the full sequence is in the commit log.
+The audit and modernization ran as a numbered phase sequence — from the security fixes in Phase 1 through the v2.2 hardening work (audit log, rate limiting, 2FA, search, categories, savings goals, transfer limits). Each phase is a commit; the full sequence is in the commit log.
 
 ## Future Work
 
+- Scheduled transfers: create a `ScheduledTransfer` model and a management command that materialises a `processing` transaction at the scheduled time, then notifies the user to confirm with their password
+- Bill splitting: `Bill` and `BillShare` models, with shares settled by the existing transfer flow rather than a new money path
 - PostgreSQL for production: SQLite supports only one writer at a time
 - Whitenoise to serve static files in production without a separate web server
+- A shared cache backend (Redis) for the rate limiter so the quota is enforced across multiple worker processes
+- Server-side TOTP replay prevention (cache the last accepted time-step per device so a code cannot be reused within its 30-second window)
+- Encrypt `TOTPDevice.secret` at rest with a KMS-managed key
 - An end-to-end settlement test driven by two browser sessions
 - An admin workflow for confirming KYC (`kyc_confirmed` is written only through the admin list view)
 - Replace the seeder's per-row date update with a bulk raw SQL update for 10× scale
 - Replace `"test" in sys.argv` with a dedicated settings module for stricter test-runner detection
-- A shared cache backend (Redis) for the rate limiter so the quota is enforced across multiple worker processes
-- Encrypt `TOTPDevice.secret` at rest with a KMS-managed key
-- Server-side TOTP replay prevention (cache the last accepted time-step per device so a code cannot be reused within its 30-second window)
 
 ## Author
 
