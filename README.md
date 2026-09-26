@@ -45,7 +45,9 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 
 **UI migration.** The original theme was replaced by Tabler 1.5.1 (MIT), vendored as prebuilt files so the application runs offline. `static/` went from 13.99 MB across 206 files to 2.38 MB across 11. A purple-accent design layer with dark mode lives in one stylesheet, `static/tabler/css/ob-theme.css`.
 
-**Demo data and features.** A `seed_demo` command generates 150 users and 3,000 transactions over 24 months, with balances replayed to match. Feature areas built on top include statements with CSV export, saved recipients, a notification center, a support ticket system, and a user settings page. A second round of work (v2.2) added an immutable audit log, rate limiting on the four credential-checking endpoints, TOTP two-factor authentication, full-text transaction search, spending categories with a dashboard doughnut chart, savings goals, and daily / weekly / monthly transfer limits enforced inside the atomic money-path block.
+**Demo data and features.** A `seed_demo` command generates 150 users and 3,000 transactions over 24 months, with balances replayed to match. Feature areas built on top include statements with CSV export, saved recipients, a notification center, a support ticket system, and a user settings page. A second round of work (v2.2) added an immutable audit log, rate limiting on the four credential-checking endpoints, TOTP two-factor authentication, full-text transaction search, spending categories with a dashboard doughnut chart, savings goals, and daily / weekly / monthly transfer limits enforced inside the atomic money-path block.      
+
+
 
 ## Screenshots
 
@@ -68,10 +70,6 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 | Two-factor enrolment | Recovery codes | Two-factor challenge |
 | --- | --- | --- |
 | ![2FA setup](docs/screenshots/security/2fa-setup.png) | ![2FA recovery codes](docs/screenshots/security/2fa-recovery-codes.png) | ![2FA challenge](docs/screenshots/security/2fa-challenge.png) |
-
-<!-- REPLACE: docs/screenshots/security/audit-log.png — /admin/audit/logentry/ changelist showing recent actions, filters, and no Add button -->
-
-<!-- REPLACE: docs/screenshots/security/transfer-limits.png — /admin/core/transferlimit/ changelist showing the day/week/month rows for a user -->
 
 | Audit log (admin) | Transfer limits (admin) |
 | --- | --- |
@@ -100,6 +98,8 @@ The project exists because of a final-year PFA. The codebase started as a 2022 D
 | Landing | Sign in | Sign up |
 | --- | --- | --- |
 | ![Landing page](docs/screenshots/marketing/landing.png) | ![Sign in](docs/screenshots/auth/sign-in.png) | ![Sign up](docs/screenshots/auth/sign-up.png) |
+
+
 
 ## Architecture
 
@@ -157,6 +157,10 @@ Every page is server-rendered. The only JavaScript is Chart.js and Tabler's own 
 | Images | Pillow 12.3.0 | Required by `ImageField` for KYC uploads |
 | 2FA | pyotp 2.9.0 | TOTP code generation and verification |
 | QR codes | qrcode[pil] 7.4.2 | Data-URL PNG for the 2FA enrolment screen |
+
+
+
+
 
 ## Engineering Decisions
 
@@ -228,6 +232,9 @@ The limit is enforced inside the same `transaction.atomic()` and `select_for_upd
 
 It counts only settled money (`completed`, `request_settled`). The row being confirmed is still `processing` at that moment, so counting in-flight rows would measure each transfer against itself — a 100.00 transfer against a 100.00 limit would be refused as 200.00.
 
+
+
+
 ## Results
 
 - 294 tests, from 0 (three stubs, four lines)
@@ -238,8 +245,6 @@ It counts only settled money (`completed`, `request_settled`). The row being con
 - Django 3.1 → 5.2 LTS, Python 3.9 → 3.12
 - Suite runtime brought to ~17 s by the test-runner hasher swap, from a run dominated by PBKDF2 at ~1.7 s per fixture user
 - 7 feature areas added in v2.2: audit log, rate limiting, 2FA, search, categories, savings goals, transfer limits
-
-## Quick Start
 
 ## Quick Start
 
@@ -255,27 +260,36 @@ $env:DJANGO_DEBUG=1
 .\venv\Scripts\python.exe manage.py seed_demo
 .\venv\Scripts\python.exe manage.py createsuperuser
 .\venv\Scripts\python.exe manage.py runserver
-Then open http://127.0.0.1:8000/. The DJANGO_DEBUG=1 env var is required for local work; see .env.example for the full list.
+```
 
-Test Credentials
-text
+Then open <http://127.0.0.1:8000/>. The `DJANGO_DEBUG=1` env var is required for local work; see `.env.example` for the full list.
+
+## Test Credentials
+
+```
 Demo user: user1@demo.local / DemoPass123!
+```
+
 Users 1–120 have KYC records and transaction history; users 121–150 are dormant accounts with no activity.
 
-To try two-factor authentication: log in as the demo user, open Settings, click Enable 2FA, scan the QR code with an authenticator app, and confirm. The next login will ask for a code.
+To try two-factor authentication: log in as the demo user, open **Settings**, click **Enable 2FA**, scan the QR code with an authenticator app, and confirm. The next login will ask for a code.
 
-Seed Instructions
-Flag	Default	Meaning
---users N	150	Number of users to create
---transactions N	3000	Number of transactions to generate
---months N	24	How far back to spread the history
---seed N	42	Random seed, for reproducible data
---force	—	Wipe existing seeded rows, then reseed
---wipe	—	Delete all seeded data and exit
-Idempotent. Refuses to run on a database that already contains seeded rows unless --force or --wipe is passed.
+## Seed Instructions
 
-Project Structure
-text
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--users N` | 150 | Number of users to create |
+| `--transactions N` | 3000 | Number of transactions to generate |
+| `--months N` | 24 | How far back to spread the history |
+| `--seed N` | 42 | Random seed, for reproducible data |
+| `--force` | — | Wipe existing seeded rows, then reseed |
+| `--wipe` | — | Delete all seeded data and exit |
+
+Idempotent. Refuses to run on a database that already contains seeded rows unless `--force` or `--wipe` is passed.
+
+## Project Structure
+
+```
 payment_prj/                 Django project: settings, root URLconf, WSGI/ASGI entry points
 core/                        Money movement (transfer, payment request, settlement),
                              transfer-limit model and check helper, landing pages,
@@ -303,39 +317,33 @@ README.md                    This file
 THIRD-PARTY.md               Third-party notices and licence provenance
 .gitattributes               Line-ending normalization and binary markers
 .github/workflows/ci.yml     CI: check, migration drift, tests
-Documentation
-Third-party licences and asset provenance are recorded in THIRD-PARTY.md. The full screenshot library lives in docs/screenshots/ with provenance notes in docs/README.md.
+```
+
+## Documentation
+
+Third-party licences and asset provenance are recorded in [THIRD-PARTY.md](./THIRD-PARTY.md). The full screenshot library lives in [`docs/screenshots/`](docs/screenshots/) with provenance notes in [`docs/README.md`](docs/README.md).
 
 The audit and modernization ran as a numbered phase sequence — from the security fixes in Phase 1 through the v2.2 hardening work (audit log, rate limiting, 2FA, search, categories, savings goals, transfer limits). Each phase is a commit; the full sequence is in the commit log.
 
-Future Work
-Scheduled transfers: create a ScheduledTransfer model and a management command that materialises a processing transaction at the scheduled time, then notifies the user to confirm with their password
+## Future Work
 
-Bill splitting: Bill and BillShare models, with shares settled by the existing transfer flow rather than a new money path
+- Scheduled transfers: create a `ScheduledTransfer` model and a management command that materialises a `processing` transaction at the scheduled time, then notifies the user to confirm with their password
+- Bill splitting: `Bill` and `BillShare` models, with shares settled by the existing transfer flow rather than a new money path
+- PostgreSQL for production: SQLite supports only one writer at a time
+- Whitenoise to serve static files in production without a separate web server
+- A shared cache backend (Redis) for the rate limiter so the quota is enforced across multiple worker processes
+- Server-side TOTP replay prevention (cache the last accepted time-step per device so a code cannot be reused within its 30-second window)
+- Encrypt `TOTPDevice.secret` at rest with a KMS-managed key
+- An end-to-end settlement test driven by two browser sessions
+- An admin workflow for confirming KYC (`kyc_confirmed` is written only through the admin list view)
+- Replace the seeder's per-row date update with a bulk raw SQL update for 10× scale
+- Replace `"test" in sys.argv` with a dedicated settings module for stricter test-runner detection
 
-PostgreSQL for production: SQLite supports only one writer at a time
+## Author
 
-Whitenoise to serve static files in production without a separate web server
+**Oussama Attouch**
 
-A shared cache backend (Redis) for the rate limiter so the quota is enforced across multiple worker processes
+- GitHub: [github.com/oussama-attouch](https://github.com/oussama-attouch)
+- LinkedIn: [linkedin.com/in/oussama-attouch-bb1558261](https://www.linkedin.com/in/oussama-attouch-bb1558261/)
 
-Server-side TOTP replay prevention (cache the last accepted time-step per device so a code cannot be reused within its 30-second window)
-
-Encrypt TOTPDevice.secret at rest with a KMS-managed key
-
-An end-to-end settlement test driven by two browser sessions
-
-An admin workflow for confirming KYC (kyc_confirmed is written only through the admin list view)
-
-Replace the seeder's per-row date update with a bulk raw SQL update for 10× scale
-
-Replace "test" in sys.argv with a dedicated settings module for stricter test-runner detection
-
-Author
-Oussama Attouch
-
-GitHub: github.com/oussama-attouch
-
-LinkedIn: linkedin.com/in/oussama-attouch-bb1558261
-
-Released under the MIT License. See LICENSE. 
+Released under the MIT License. See [LICENSE](./LICENSE).
