@@ -136,6 +136,52 @@ html[data-bs-theme] {
   --tblr-navbar-border-color: #1f293d;
 }
 
+/* ===== SIDEBAR ELEVATION -- outer seam, hairline preserved ===== */
+/* The sidebar and the page background are only three values apart per channel
+   (sidebar #ffffff on body #f8f9fa; #0d1322 on #0b0f19 in dark), so the 1px
+   inset hairline above was the entire separation. This adds the outer shade
+   that makes the rail read as its own surface.
+
+   Two things the declarations below are load-bearing for:
+
+   1. box-shadow is ONE property, not a stack of layers. Tabler draws the
+      right edge with
+      `@media (min-width:992px) .navbar-expand-lg.navbar-vertical
+       {box-shadow:inset calc(-1 * var(--tblr-navbar-border-width)) 0 0 0
+        var(--tblr-navbar-border-color)}`.
+      Declaring an outer shadow without repeating that inset layer would
+      silently delete the hairline and leave the seam softer, not sharper.
+      Every rule here repeats it verbatim.
+
+   2. The `1px 0 0 0 var(--tblr-border-color)` keyline is what survives in
+      dark mode. A black drop shadow over #0b0f19 is close to invisible, so
+      the crisp edge -- #1f293d against #0b0f19 -- carries the separation
+      there, and the soft layer carries it in light mode.
+
+   Scoped to the lg rail because that is the only width where the aside is a
+   persistent surface: below 992px .navbar-vertical is display:none and Tabler
+   renders the nav as its own off-canvas panel, which this leaves untouched.
+
+   Reach check: the outer shadow extends 18 - 6 = 12px. The measured gutter
+   between the sidebar edge and the first card is 1rem (16px, from Tabler's
+   container padding), so the shade lands in empty space and never overlaps
+   body text. No width, background, colour or z-index is touched -- box-shadow
+   paints outside the border box only. */
+@media (min-width: 992px) {
+  .navbar-expand-lg.navbar-vertical {
+    box-shadow:
+      inset calc(-1 * var(--tblr-navbar-border-width)) 0 0 0 var(--tblr-navbar-border-color),
+      1px 0 0 0 var(--tblr-border-color),
+      6px 0 18px -6px rgba(15, 23, 42, 0.14);
+  }
+  [data-bs-theme="dark"] .navbar-expand-lg.navbar-vertical {
+    box-shadow:
+      inset calc(-1 * var(--tblr-navbar-border-width)) 0 0 0 var(--tblr-navbar-border-color),
+      1px 0 0 0 var(--tblr-border-color),
+      6px 0 18px -6px rgba(0, 0, 0, 0.60);
+  }
+}
+
 /* ===== SIDEBAR ACTIVE STATE -- left accent bar ===== */
 /* The transparent border reserves the 3px on every item, so activating a
    link marks it in place instead of shifting the label sideways. */
