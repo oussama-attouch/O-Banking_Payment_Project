@@ -241,8 +241,11 @@ It counts only settled money (`completed`, `request_settled`). The row being con
 
 ## Quick Start
 
+## Quick Start
+
 Prerequisites: Python 3.12 and Git.
 
+```bash
 git clone https://github.com/oussama-attouch/O-Banking_Payment_Project_V2.git
 cd O-Banking_Payment_Project_V2
 py -3.12 -m venv venv
@@ -335,4 +338,4 @@ GitHub: github.com/oussama-attouch
 
 LinkedIn: linkedin.com/in/oussama-attouch-bb1558261
 
-Released under the MIT License. See LICENSE.
+Released under the MIT License. See LICENSE. 
